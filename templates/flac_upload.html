@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FLAC Upload - Blockchain Audio Storage</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* FLAC specific styles */
+        .flac-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .flac-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .flac-header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .flac-header p {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .upload-zone {
+            border: 2px dashed #444;
+            border-radius: 16px;
+            padding: 40px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: #00d4aa;
+            background: rgba(0, 212, 170, 0.05);
+        }
+
+        .upload-zone.has-file {
+            border-color: #00d4aa;
+            border-style: solid;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            color: #ccc;
+            margin-bottom: 10px;
+        }
+
+        .upload-hint {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        .file-info {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .file-info.visible {
+            display: block;
+        }
+
+        .file-info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        .file-info-label {
+            color: #888;
+        }
+
+        .file-info-value {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .cost-highlight {
+            color: #00d4aa;
+            font-size: 1.1rem;
+        }
+
+        .upload-btn {
+            width: 100%;
+            padding: 16px;
+            font-size: 1.1rem;
+            background: linear-gradient(135deg, #00d4aa, #00a080);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: none;
+        }
+
+        .upload-btn.visible {
+            display: block;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .upload-btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* Payment section */
+        .payment-section {
+            display: none;
+            text-align: center;
+        }
+
+        .payment-section.visible {
+            display: block;
+        }
+
+        .qr-container {
+            background: #fff;
+            padding: 20px;
+            border-radius: 16px;
+            display: inline-block;
+            margin: 20px 0;
+        }
+
+        .qr-container img {
+            width: 200px;
+            height: 200px;
+        }
+
+        .payment-address {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 15px 0;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        .payment-amount {
+            font-size: 1.5rem;
+            color: #00d4aa;
+            font-weight: 600;
+            margin: 10px 0;
+        }
+
+        .copy-btn {
+            background: #333;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .copy-btn:hover {
+            background: #444;
+        }
+
+        .status-message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #1a1a2e;
+        }
+
+        /* Navigation */
+        .nav-links {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            color: #888;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover,
+        .nav-link.active {
+            color: #00d4aa;
+            background: rgba(0, 212, 170, 0.1);
+        }
+
+        /* Mobile responsive */
+        @media (max-width: 480px) {
+            .flac-container {
+                padding: 15px;
+            }
+
+            .flac-header h1 {
+                font-size: 1.5rem;
+            }
+
+            .upload-zone {
+                padding: 30px 15px;
+            }
+
+            .upload-icon {
+                font-size: 36px;
+            }
+
+            .qr-container img {
+                width: 180px;
+                height: 180px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="flac-container">
+        <nav class="nav-links">
+            <a href="/" class="nav-link">Dashboard</a>
+            <a href="/flac/upload" class="nav-link active">Upload FLAC</a>
+            <a href="/flac/player" class="nav-link">Player</a>
+        </nav>
+
+        <div class="flac-header">
+            <h1>🎵 FLAC Upload</h1>
+            <p>Store your high-quality audio on the BSV blockchain forever</p>
+        </div>
+
+        <div id="uploadSection">
+            <div class="upload-zone" id="dropZone">
+                <div class="upload-icon">📁</div>
+                <div class="upload-text">Tap to select or drag & drop</div>
+                <div class="upload-hint">FLAC files only • Max 10MB recommended</div>
+                <input type="file" id="fileInput" accept=".flac,audio/flac" hidden>
+            </div>
+
+            <div class="file-info" id="fileInfo">
+                <div class="file-info-row">
+                    <span class="file-info-label">File</span>
+                    <span class="file-info-value" id="fileName">-</span>
+                </div>
+                <div class="file-info-row">
+                    <span class="file-info-label">Size</span>
+                    <span class="file-info-value" id="fileSize">-</span>
+                </div>
+                <div class="file-info-row">
+                    <span class="file-info-label">Est. Cost</span>
+                    <span class="file-info-value cost-highlight" id="estCost">-</span>
+                </div>
+            </div>
+
+            <button class="upload-btn" id="uploadBtn">Prepare Upload</button>
+        </div>
+
+        <div class="payment-section" id="paymentSection">
+            <h2>💳 Payment Required</h2>
+            <p>Send the exact amount to the address below</p>
+
+            <div class="payment-amount" id="paymentAmount">-</div>
+
+            <div class="qr-container">
+                <img id="qrCode" src="" alt="QR Code">
+            </div>
+
+            <div class="payment-address" id="paymentAddress">-</div>
+
+            <button class="copy-btn" id="copyBtn">📋 Copy Address</button>
+
+            <div class="status-message" id="statusMessage">
+                ⏳ Waiting for payment...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const uploadSection = document.getElementById('uploadSection');
+        const paymentSection = document.getElementById('paymentSection');
+
+        let selectedFile = null;
+        let currentJobId = null;
+
+        // File selection
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.toLowerCase().endsWith('.flac')) {
+                alert('Please select a FLAC file');
+                return;
+            }
+
+            selectedFile = file;
+            dropZone.classList.add('has-file');
+
+            document.getElementById('fileName').textContent = file.name;
+            document.getElementById('fileSize').textContent = formatSize(file.size);
+            
+            // Estimate cost (0.002 sats/byte + overhead)
+            const estSats = Math.ceil((file.size + 150) * 0.002);
+            const estBsv = (estSats / 100000000).toFixed(8);
+            document.getElementById('estCost').textContent = `~${estBsv} BSV`;
+
+            fileInfo.classList.add('visible');
+            uploadBtn.classList.add('visible');
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        // Upload
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Preparing...';
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            try {
+                const response = await fetch('/api/flac/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    currentJobId = data.job_id;
+                    showPaymentSection(data);
+                } else {
+                    alert('Error: ' + data.error);
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = 'Prepare Upload';
+                }
+            } catch (error) {
+                alert('Upload failed: ' + error.message);
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Prepare Upload';
+            }
+        });
+
+        function showPaymentSection(data) {
+            uploadSection.style.display = 'none';
+            paymentSection.classList.add('visible');
+
+            const bsvAmount = (data.required_satoshis / 100000000).toFixed(8);
+            document.getElementById('paymentAmount').textContent = bsvAmount + ' BSV';
+            document.getElementById('paymentAddress').textContent = data.payment_address;
+
+            // Generate QR code
+            const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=bitcoin:${data.payment_address}?amount=${bsvAmount}`;
+            document.getElementById('qrCode').src = qrUrl;
+
+            // Start polling for payment
+            pollPaymentStatus();
+        }
+
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const address = document.getElementById('paymentAddress').textContent;
+            navigator.clipboard.writeText(address).then(() => {
+                document.getElementById('copyBtn').textContent = '✅ Copied!';
+                setTimeout(() => {
+                    document.getElementById('copyBtn').textContent = '📋 Copy Address';
+                }, 2000);
+            });
+        });
+
+        async function pollPaymentStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/flac/status/${currentJobId}`);
+                const data = await response.json();
+
+                const statusMsg = document.getElementById('statusMessage');
+
+                if (data.status === 'complete') {
+                    statusMsg.innerHTML = `✅ Upload complete!<br>TXID: <a href="https://whatsonchain.com/tx/${data.txid}" target="_blank" style="color: #00d4aa;">${data.txid.substring(0, 16)}...</a>`;
+                    return;
+                } else if (data.status === 'error') {
+                    statusMsg.innerHTML = `❌ Error: ${data.message}`;
+                    return;
+                } else if (data.status === 'processing') {
+                    statusMsg.innerHTML = `⏳ ${data.message} (${Math.round(data.progress)}%)`;
+                } else {
+                    statusMsg.innerHTML = `⏳ ${data.message}`;
+                }
+
+                // Continue polling
+                setTimeout(pollPaymentStatus, 3000);
+            } catch (error) {
+                console.error('Status check failed:', error);
+                setTimeout(pollPaymentStatus, 5000);
+            }
+        }
+    </script>
+</body>
+</html>

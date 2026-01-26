@@ -1,0 +1,288 @@
+use axum::{
+    extract::{Multipart, Path, State},
+    http::StatusCode,
+    response::{Html, IntoResponse, Json},
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use crate::models::{Job, JobStatus, JobType};
+use crate::services::bsv::BsvService;
+use crate::services::job::process_flac_download;
+use crate::AppState;
+
+/// FLAC upload page
+pub async fn flac_upload_page() -> Html<String> {
+    let html = include_str!("../../templates/flac_upload.html");
+    Html(html.to_string())
+}
+
+/// FLAC player page (download + playback)
+pub async fn flac_player_page() -> Html<String> {
+    let html = include_str!("../../templates/flac_player.html");
+    Html(html.to_string())
+}
+
+/// FLAC status page
+pub async fn flac_status_page(Path(job_id): Path<String>) -> Html<String> {
+    let html = include_str!("../../templates/flac_status.html");
+    let html = html.replace("{{JOB_ID}}", &job_id);
+    Html(html)
+}
+
+#[derive(Serialize)]
+pub struct FlacUploadResponse {
+    pub success: bool,
+    pub job_id: Option<String>,
+    pub payment_address: Option<String>,
+    pub required_satoshis: Option<i64>,
+    pub error: Option<String>,
+}
+
+/// Prepare FLAC upload - creates job and returns payment address
+pub async fn prepare_flac_upload(
+    State(state): State<Arc<RwLock<AppState>>>,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let mut filename: Option<String> = None;
+    let mut file_data: Option<Vec<u8>> = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+
+        if name == "file" {
+            filename = field.file_name().map(|s| s.to_string());
+            if let Ok(data) = field.bytes().await {
+                file_data = Some(data.to_vec());
+            }
+        }
+    }
+
+    let file_data = match file_data {
+        Some(data) => data,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(FlacUploadResponse {
+                    success: false,
+                    job_id: None,
+                    payment_address: None,
+                    required_satoshis: None,
+                    error: Some("No file provided".to_string()),
+                }),
+            );
+        }
+    };
+
+    let filename = filename.unwrap_or_else(|| "audio.flac".to_string());
+
+    // Validate FLAC file
+    if !filename.to_lowercase().ends_with(".flac") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(FlacUploadResponse {
+                success: false,
+                job_id: None,
+                payment_address: None,
+                required_satoshis: None,
+                error: Some("Only FLAC files are supported".to_string()),
+            }),
+        );
+    }
+
+    // Generate payment keypair
+    let (wif, address) = BsvService::generate_keypair();
+
+    // Calculate required satoshis
+    let required_satoshis = {
+        let state = state.read().await;
+        state.bsv.calculate_upload_cost(file_data.len())
+    };
+
+    // Create job
+    let job_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+    let now = chrono::Utc::now();
+
+    let job = Job {
+        id: job_id.clone(),
+        job_type: JobType::Upload,
+        status: JobStatus::PendingPayment,
+        filename: Some(filename),
+        file_size: Some(file_data.len() as i64),
+        file_data: Some(file_data),
+        payment_address: Some(address.clone()),
+        payment_wif: Some(wif),
+        required_satoshis: Some(required_satoshis),
+        manifest_txid: None,
+        download_link: None,
+        progress: 0.0,
+        message: "Waiting for payment...".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+
+    {
+        let state = state.read().await;
+        if let Err(e) = state.db.insert_job(&job) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(FlacUploadResponse {
+                    success: false,
+                    job_id: None,
+                    payment_address: None,
+                    required_satoshis: None,
+                    error: Some(format!("Failed to create job: {}", e)),
+                }),
+            );
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(FlacUploadResponse {
+            success: true,
+            job_id: Some(job_id),
+            payment_address: Some(address),
+            required_satoshis: Some(required_satoshis),
+            error: None,
+        }),
+    )
+}
+
+#[derive(Deserialize)]
+pub struct FlacDownloadRequest {
+    pub txid: String,
+}
+
+#[derive(Serialize)]
+pub struct FlacDownloadResponse {
+    pub success: bool,
+    pub job_id: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Start FLAC download
+pub async fn start_flac_download(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<FlacDownloadRequest>,
+) -> impl IntoResponse {
+    let txid = req.txid.trim().to_string();
+
+    if txid.len() != 64 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(FlacDownloadResponse {
+                success: false,
+                job_id: None,
+                error: Some("Invalid TXID format (must be 64 characters)".to_string()),
+            }),
+        );
+    }
+
+    // Create download job
+    let job_id = uuid::Uuid::new_v4().to_string().replace("-", "");
+    let now = chrono::Utc::now();
+
+    let job = Job {
+        id: job_id.clone(),
+        job_type: JobType::Download,
+        status: JobStatus::Processing,
+        filename: None,
+        file_size: None,
+        file_data: None,
+        payment_address: None,
+        payment_wif: None,
+        required_satoshis: None,
+        manifest_txid: Some(txid.clone()),
+        download_link: None,
+        progress: 0.0,
+        message: "Starting FLAC download...".to_string(),
+        created_at: now,
+        updated_at: now,
+    };
+
+    {
+        let state_read = state.read().await;
+        if let Err(e) = state_read.db.insert_job(&job) {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(FlacDownloadResponse {
+                    success: false,
+                    job_id: None,
+                    error: Some(format!("Failed to create job: {}", e)),
+                }),
+            );
+        }
+    }
+
+    // Start download process
+    let state_clone = state.clone();
+    let job_id_clone = job_id.clone();
+    tokio::spawn(async move {
+        process_flac_download(state_clone, job_id_clone, txid).await;
+    });
+
+    (
+        StatusCode::OK,
+        Json(FlacDownloadResponse {
+            success: true,
+            job_id: Some(job_id),
+            error: None,
+        }),
+    )
+}
+
+#[derive(Serialize)]
+pub struct FlacStatusResponse {
+    pub status: String,
+    pub progress: f64,
+    pub message: String,
+    pub txid: Option<String>,
+    pub download_link: Option<String>,
+    pub filename: Option<String>,
+}
+
+/// Get FLAC job status
+pub async fn get_flac_status(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Path(job_id): Path<String>,
+) -> impl IntoResponse {
+    let state = state.read().await;
+
+    match state.db.get_job(&job_id) {
+        Ok(Some(job)) => {
+            let status = match job.status {
+                JobStatus::PendingPayment => "pending_payment",
+                JobStatus::Processing => "processing",
+                JobStatus::Complete => "complete",
+                JobStatus::Error => "error",
+            };
+
+            Json(FlacStatusResponse {
+                status: status.to_string(),
+                progress: job.progress,
+                message: job.message,
+                txid: job.manifest_txid,
+                download_link: job.download_link,
+                filename: job.filename,
+            })
+        }
+        Ok(None) => Json(FlacStatusResponse {
+            status: "not_found".to_string(),
+            progress: 0.0,
+            message: "Job not found".to_string(),
+            txid: None,
+            download_link: None,
+            filename: None,
+        }),
+        Err(e) => Json(FlacStatusResponse {
+            status: "error".to_string(),
+            progress: 0.0,
+            message: format!("Database error: {}", e),
+            txid: None,
+            download_link: None,
+            filename: None,
+        }),
+    }
+}

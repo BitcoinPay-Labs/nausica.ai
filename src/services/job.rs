@@ -53,6 +53,11 @@ pub async fn payment_watcher(state: Arc<RwLock<AppState>>) {
                                 );
                             }
 
+                            // Determine if this is a FLAC job
+                            let is_flac = job.filename.as_ref()
+                                .map(|f| f.to_lowercase().ends_with(".flac"))
+                                .unwrap_or(false);
+
                             // Start upload process
                             let state_clone = state.clone();
                             let job_id = job.id.clone();
@@ -62,15 +67,27 @@ pub async fn payment_watcher(state: Arc<RwLock<AppState>>) {
                             let filename = job.filename.clone();
 
                             tokio::spawn(async move {
-                                process_upload(
-                                    state_clone,
-                                    job_id,
-                                    wif_clone,
-                                    address_clone,
-                                    file_data,
-                                    filename,
-                                )
-                                .await;
+                                if is_flac {
+                                    process_flac_upload(
+                                        state_clone,
+                                        job_id,
+                                        wif_clone,
+                                        address_clone,
+                                        file_data,
+                                        filename,
+                                    )
+                                    .await;
+                                } else {
+                                    process_upload(
+                                        state_clone,
+                                        job_id,
+                                        wif_clone,
+                                        address_clone,
+                                        file_data,
+                                        filename,
+                                    )
+                                    .await;
+                                }
                             });
                         }
                     }
@@ -79,6 +96,161 @@ pub async fn payment_watcher(state: Arc<RwLock<AppState>>) {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Process FLAC upload using OP_FALSE OP_IF format
+async fn process_flac_upload(
+    state: Arc<RwLock<AppState>>,
+    job_id: String,
+    wif: String,
+    address: String,
+    file_data: Option<Vec<u8>>,
+    filename: Option<String>,
+) {
+    let file_data = match file_data {
+        Some(data) => data,
+        None => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, "No file data found");
+            return;
+        }
+    };
+
+    let filename = filename.unwrap_or_else(|| "audio.flac".to_string());
+
+    // Update progress
+    {
+        let state = state.read().await;
+        let _ = state.db.update_job_progress(&job_id, 10.0, "Fetching UTXOs...");
+    }
+
+    // Get UTXOs
+    let utxos = {
+        let state = state.read().await;
+        state.bitails.get_address_unspent(&address).await
+    };
+
+    let utxos = match utxos {
+        Ok(u) => u,
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
+            return;
+        }
+    };
+
+    if utxos.is_empty() {
+        let state = state.read().await;
+        let _ = state.db.update_job_error(&job_id, "No UTXOs found");
+        return;
+    }
+
+    // Update progress
+    {
+        let state = state.read().await;
+        let _ = state.db.update_job_progress(&job_id, 30.0, "Creating FLAC transaction...");
+    }
+
+    // Calculate total input
+    let total_input: i64 = utxos.iter().map(|u| u.satoshis).sum();
+
+    // Get scriptPubKey for the address
+    let script_pubkey = match BsvService::create_p2pkh_script(&address) {
+        Ok(s) => s,
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Failed to create script: {}", e));
+            return;
+        }
+    };
+
+    // Prepare UTXOs for transaction
+    let utxo_inputs: Vec<(String, u32, i64, Vec<u8>)> = utxos
+        .iter()
+        .map(|u| (u.txid.clone(), u.vout, u.satoshis, script_pubkey.clone()))
+        .collect();
+
+    // Create OP_FALSE OP_IF script for FLAC storage
+    let protocol = b"flacstore";
+    let mime_type = b"audio/flac";
+    
+    // Create metadata JSON
+    let metadata = serde_json::json!({
+        "filename": filename,
+        "size": file_data.len(),
+        "version": "1.0"
+    }).to_string();
+
+    // Split file data into chunks (max 100KB per chunk for efficiency)
+    let max_chunk_size = 100 * 1024; // 100KB
+    let data_chunks = BsvService::split_into_chunks(&file_data, max_chunk_size);
+
+    let flac_script = BsvService::create_flac_store_script(
+        protocol,
+        mime_type,
+        metadata.as_bytes(),
+        &data_chunks,
+    );
+
+    // Calculate fee
+    let tx_size = 150 + flac_script.len();
+    let fee = {
+        let state = state.read().await;
+        (tx_size as f64 * state.bsv.fee_rate).ceil() as i64
+    };
+
+    // Outputs: FLAC script (1 satoshi to avoid dust limit error)
+    // Note: OP_FALSE OP_IF scripts are unspendable, but some nodes still require min output
+    let outputs: Vec<(Vec<u8>, i64)> = vec![(flac_script, 1)];
+
+    // Check if we have enough for fee
+    if total_input < fee {
+        let state = state.read().await;
+        let _ = state.db.update_job_error(
+            &job_id,
+            &format!("Insufficient funds: {} < {}", total_input, fee),
+        );
+        return;
+    }
+
+    // Create transaction
+    let raw_tx = {
+        let state = state.read().await;
+        state.bsv.create_transaction(&wif, &utxo_inputs, &outputs)
+    };
+
+    let raw_tx = match raw_tx {
+        Ok(tx) => tx,
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Failed to create tx: {}", e));
+            return;
+        }
+    };
+
+    // Update progress
+    {
+        let state = state.read().await;
+        let _ = state.db.update_job_progress(&job_id, 60.0, "Broadcasting FLAC transaction...");
+    }
+
+    // Broadcast transaction
+    let broadcast_result = {
+        let state = state.read().await;
+        state.bitails.broadcast_transaction(&raw_tx).await
+    };
+
+    match broadcast_result {
+        Ok(txid) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_complete(&job_id, &txid, None);
+            tracing::info!("FLAC upload complete for job {}: txid={}", job_id, txid);
+        }
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Broadcast failed: {}", e));
         }
     }
 }
@@ -217,10 +389,10 @@ async fn process_upload(
     };
 
     match broadcast_result {
-        Ok(response) => {
+        Ok(txid) => {
             let state = state.read().await;
-            let _ = state.db.update_job_complete(&job_id, &response.txid, None);
-            tracing::info!("Upload complete for job {}: txid={}", job_id, response.txid);
+            let _ = state.db.update_job_complete(&job_id, &txid, None);
+            tracing::info!("Upload complete for job {}: txid={}", job_id, txid);
         }
         Err(e) => {
             let state = state.read().await;
@@ -276,8 +448,8 @@ pub async fn process_download(
         }
     };
 
-    // Extract OP_RETURN data from raw transaction
-    let output_data = match extract_op_return_from_tx(&tx_raw) {
+    // Extract data output from raw transaction
+    let output_data = match extract_data_from_tx(&tx_raw) {
         Ok(data) => data,
         Err(e) => {
             let state = state.read().await;
@@ -292,8 +464,9 @@ pub async fn process_download(
         let _ = state.db.update_job_progress(&job_id, 60.0, "Parsing data...");
     }
 
-    // Parse the OP_RETURN script
-    let parsed = parse_op_return_script(&output_data);
+    // Try to parse as FLAC store format first, then fall back to OP_RETURN
+    let parsed = parse_flac_store_script(&output_data)
+        .or_else(|_| parse_op_return_script(&output_data));
 
     match parsed {
         Ok((filename, _mime_type, file_data)) => {
@@ -314,13 +487,160 @@ pub async fn process_download(
 
             let state = state.read().await;
             let _ = state.db.update_job_complete(&job_id, &txid, Some(&download_link));
-            tracing::info!("Download complete for job {}", job_id);
         }
         Err(e) => {
             let state = state.read().await;
             let _ = state.db.update_job_error(&job_id, &format!("Failed to parse data: {}", e));
         }
     }
+}
+
+/// Process FLAC download specifically
+pub async fn process_flac_download(
+    state: Arc<RwLock<AppState>>,
+    job_id: String,
+    txid: String,
+) {
+    // Update progress
+    {
+        let state = state.read().await;
+        let _ = state.db.update_job_progress(&job_id, 10.0, "Fetching FLAC transaction...");
+    }
+
+    // Download the raw transaction
+    let tx_raw = {
+        let state = state.read().await;
+        state.bitails.download_tx_raw(&txid).await
+    };
+
+    let tx_raw = match tx_raw {
+        Ok(data) => data,
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Failed to download: {}", e));
+            return;
+        }
+    };
+
+    // Update progress
+    {
+        let state = state.read().await;
+        let _ = state.db.update_job_progress(&job_id, 40.0, "Extracting FLAC data...");
+    }
+
+    // Extract data output from raw transaction
+    let output_data = match extract_data_from_tx(&tx_raw) {
+        Ok(data) => data,
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Failed to extract data: {}", e));
+            return;
+        }
+    };
+
+    // Update progress
+    {
+        let state = state.read().await;
+        let _ = state.db.update_job_progress(&job_id, 60.0, "Parsing FLAC data...");
+    }
+
+    // Parse as FLAC store format
+    let parsed = parse_flac_store_script(&output_data);
+
+    match parsed {
+        Ok((filename, mime_type, file_data)) => {
+            // Save file to downloads directory
+            let download_path = format!("./data/downloads/{}", job_id);
+            std::fs::create_dir_all("./data/downloads").ok();
+
+            let file_path = format!("{}/{}", download_path, filename);
+            std::fs::create_dir_all(&download_path).ok();
+
+            if let Err(e) = std::fs::write(&file_path, &file_data) {
+                let state = state.read().await;
+                let _ = state.db.update_job_error(&job_id, &format!("Failed to save file: {}", e));
+                return;
+            }
+
+            let download_link = format!("/downloads/{}/{}", job_id, filename);
+
+            // Update progress
+            {
+                let state = state.read().await;
+                let _ = state.db.update_job_progress(&job_id, 90.0, "FLAC file ready for playback...");
+            }
+
+            let state = state.read().await;
+            let _ = state.db.update_job_complete(&job_id, &txid, Some(&download_link));
+            tracing::info!("FLAC download complete for job {}: {} ({})", job_id, filename, mime_type);
+        }
+        Err(e) => {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, &format!("Failed to parse FLAC data: {}", e));
+        }
+    }
+}
+
+/// Parse FLAC store script (OP_FALSE OP_IF format)
+fn parse_flac_store_script(script: &[u8]) -> Result<(String, String, Vec<u8>), String> {
+    // Check for OP_FALSE OP_IF
+    if script.len() < 4 || script[0] != 0x00 || script[1] != 0x63 {
+        return Err("Not a valid OP_FALSE OP_IF script".to_string());
+    }
+
+    let mut pos = 2;
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+
+    while pos < script.len() {
+        // Check for OP_ENDIF
+        if script[pos] == 0x68 {
+            break;
+        }
+
+        let (data, new_pos) = read_push_data(script, pos)?;
+        parts.push(data);
+        pos = new_pos;
+    }
+
+    if parts.len() < 4 {
+        return Err(format!("Expected at least 4 parts, got {}", parts.len()));
+    }
+
+    // parts[0] = protocol ("flacstore")
+    // parts[1] = mime type ("audio/flac")
+    // parts[2] = metadata (JSON)
+    // parts[3..] = data chunks
+
+    let protocol = String::from_utf8(parts[0].clone())
+        .unwrap_or_else(|_| "unknown".to_string());
+    
+    if protocol != "flacstore" {
+        return Err(format!("Unknown protocol: {}", protocol));
+    }
+
+    let mime_type = String::from_utf8(parts[1].clone())
+        .unwrap_or_else(|_| "audio/flac".to_string());
+
+    // Parse metadata to get filename
+    let metadata_str = String::from_utf8(parts[2].clone())
+        .unwrap_or_else(|_| "{}".to_string());
+    
+    let filename = if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&metadata_str) {
+        metadata.get("filename")
+            .and_then(|v| v.as_str())
+            .unwrap_or("audio.flac")
+            .to_string()
+    } else {
+        "audio.flac".to_string()
+    };
+
+    // Concatenate all data chunks
+    let mut file_data = Vec::new();
+    for chunk in &parts[3..] {
+        file_data.extend_from_slice(chunk);
+    }
+
+    Ok((filename, mime_type, file_data))
 }
 
 fn parse_op_return_script(script: &[u8]) -> Result<(String, String, Vec<u8>), String> {
@@ -417,15 +737,9 @@ fn read_push_data(script: &[u8], pos: usize) -> Result<(Vec<u8>, usize), String>
     }
 }
 
-fn extract_op_return_from_tx(tx_raw: &[u8]) -> Result<Vec<u8>, String> {
-    // Parse raw transaction to find OP_RETURN output
-    // Transaction format:
-    // - 4 bytes: version
-    // - varint: input count
-    // - inputs
-    // - varint: output count
-    // - outputs (each: 8 bytes value + varint script length + script)
-    
+/// Extract data from transaction - supports both OP_RETURN and OP_FALSE OP_IF formats
+fn extract_data_from_tx(tx_raw: &[u8]) -> Result<Vec<u8>, String> {
+    // Parse raw transaction to find data output
     let mut pos = 4; // Skip version
     
     // Read input count
@@ -445,7 +759,7 @@ fn extract_op_return_from_tx(tx_raw: &[u8]) -> Result<Vec<u8>, String> {
     let (output_count, new_pos) = read_varint(tx_raw, pos)?;
     pos = new_pos;
     
-    // Find OP_RETURN output
+    // Find data output (OP_RETURN or OP_FALSE OP_IF)
     for _ in 0..output_count {
         pos += 8; // value (8 bytes)
         let (script_len, new_pos) = read_varint(tx_raw, pos)?;
@@ -463,10 +777,15 @@ fn extract_op_return_from_tx(tx_raw: &[u8]) -> Result<Vec<u8>, String> {
             return Ok(script.to_vec());
         }
         
+        // Check if this is an OP_FALSE OP_IF output (flacstore format)
+        if script.len() > 2 && script[0] == 0x00 && script[1] == 0x63 {
+            return Ok(script.to_vec());
+        }
+        
         pos = script_end;
     }
     
-    Err("No OP_RETURN output found".to_string())
+    Err("No data output found".to_string())
 }
 
 fn read_varint(data: &[u8], pos: usize) -> Result<(u64, usize), String> {

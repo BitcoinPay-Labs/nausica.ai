@@ -67,13 +67,23 @@ async fn main() {
         .route("/upload", get(routes::upload::upload_page))
         .route("/download", get(routes::download::download_page))
         .route("/status/:job_id", get(routes::status::status_page))
+        // FLAC pages
+        .route("/flac", get(routes::flac::flac_upload_page))
+        .route("/flac/upload", get(routes::flac::flac_upload_page))
+        .route("/flac/player", get(routes::flac::flac_player_page))
+        .route("/flac/status/:job_id", get(routes::flac::flac_status_page))
         // API endpoints
         .route("/prepare_upload", post(routes::upload::prepare_upload))
         .route("/start_download", post(routes::download::start_download))
         .route("/status_update/:job_id", get(routes::status::status_update))
         .route("/api/jobs", get(routes::dashboard::get_jobs))
-        // Static files
+        // FLAC API endpoints
+        .route("/api/flac/upload", post(routes::flac::prepare_flac_upload))
+        .route("/api/flac/download", post(routes::flac::start_flac_download))
+        .route("/api/flac/status/:job_id", get(routes::flac::get_flac_status))
+        // Static files and downloads
         .nest_service("/static", ServeDir::new("static"))
+        .nest_service("/downloads", ServeDir::new("./data/downloads"))
         .with_state(state);
 
     // Start server

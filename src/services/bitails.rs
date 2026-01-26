@@ -27,7 +27,14 @@ pub struct UnspentResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BroadcastResponse {
-    pub txid: String,
+    pub txid: Option<String>,
+    pub error: Option<BroadcastError>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BroadcastError {
+    pub code: Option<i32>,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -128,7 +135,7 @@ impl BitailsClient {
         Ok(result.unspent)
     }
 
-    pub async fn broadcast_transaction(&self, raw_tx_hex: &str) -> Result<BroadcastResponse, String> {
+    pub async fn broadcast_transaction(&self, raw_tx_hex: &str) -> Result<String, String> {
         let url = format!("{}/tx/broadcast", self.base_url);
         let response = self
             .build_post_request(&url)
@@ -138,17 +145,32 @@ impl BitailsClient {
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(format!("Broadcast failed: {}", error_text));
+        let response_text = response.text().await.unwrap_or_default();
+        
+        // Try to parse as JSON
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+            // Check for error
+            if let Some(error) = json.get("error") {
+                let error_msg = error.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(format!("Broadcast failed: {}", error_msg));
+            }
+            
+            // Get txid
+            if let Some(txid) = json.get("txid").and_then(|t| t.as_str()) {
+                return Ok(txid.to_string());
+            }
         }
-
-        response
-            .json::<BroadcastResponse>()
-            .await
-            .map_err(|e| format!("Parse error: {}", e))
+        
+        // If response looks like a txid (64 hex chars), return it
+        let trimmed = response_text.trim().trim_matches('"');
+        if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Ok(trimmed.to_string());
+        }
+        
+        Err(format!("Unexpected response: {}", response_text))
     }
-
     pub async fn get_transaction(&self, txid: &str) -> Result<Transaction, String> {
         let url = format!("{}/tx/{}", self.base_url, txid);
         let response = self

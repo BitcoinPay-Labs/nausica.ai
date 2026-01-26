@@ -108,7 +108,7 @@ impl BsvService {
         std::cmp::max(fee + 1, 546) // 546 is dust limit
     }
 
-    /// Create OP_RETURN script with data
+    /// Create OP_RETURN script with data (legacy method)
     pub fn create_op_return_script(data_parts: &[&[u8]]) -> Vec<u8> {
         let mut script = Vec::new();
 
@@ -123,8 +123,146 @@ impl BsvService {
         script
     }
 
+    /// Create OP_FALSE OP_IF script for FLAC storage
+    /// Format:
+    ///   OP_FALSE (0x00)
+    ///   OP_IF (0x63)
+    ///     PUSHDATA <protocol identifier>  // "flacstore"
+    ///     PUSHDATA <mime type>            // "audio/flac"
+    ///     PUSHDATA <filename/metadata>    // JSON or string
+    ///     PUSHDATA <data chunk 1>
+    ///     PUSHDATA <data chunk 2>
+    ///     ...
+    ///   OP_ENDIF (0x68)
+    pub fn create_flac_store_script(
+        protocol: &[u8],
+        mime_type: &[u8],
+        metadata: &[u8],
+        data_chunks: &[Vec<u8>],
+    ) -> Vec<u8> {
+        let mut script = Vec::new();
+
+        // OP_FALSE OP_IF
+        script.push(0x00); // OP_FALSE
+        script.push(0x63); // OP_IF
+
+        // Protocol identifier
+        Self::push_data(&mut script, protocol);
+
+        // MIME type
+        Self::push_data(&mut script, mime_type);
+
+        // Metadata (filename, etc.)
+        Self::push_data(&mut script, metadata);
+
+        // Data chunks
+        for chunk in data_chunks {
+            Self::push_data(&mut script, chunk);
+        }
+
+        // OP_ENDIF
+        script.push(0x68); // OP_ENDIF
+
+        script
+    }
+
+    /// Split data into chunks suitable for PUSHDATA
+    /// Maximum chunk size is 520 bytes for standard scripts,
+    /// but BSV allows larger pushes. We'll use 100KB chunks for efficiency.
+    pub fn split_into_chunks(data: &[u8], max_chunk_size: usize) -> Vec<Vec<u8>> {
+        data.chunks(max_chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect()
+    }
+
+    /// Parse OP_FALSE OP_IF script and extract data
+    /// Returns: (protocol, mime_type, metadata, data_chunks)
+    pub fn parse_flac_store_script(script: &[u8]) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<Vec<u8>>), String> {
+        if script.len() < 4 {
+            return Err("Script too short".to_string());
+        }
+
+        // Check OP_FALSE OP_IF
+        if script[0] != 0x00 || script[1] != 0x63 {
+            return Err("Not a valid OP_FALSE OP_IF script".to_string());
+        }
+
+        let mut pos = 2;
+        let mut data_parts: Vec<Vec<u8>> = Vec::new();
+
+        while pos < script.len() {
+            // Check for OP_ENDIF
+            if script[pos] == 0x68 {
+                break;
+            }
+
+            // Read PUSHDATA
+            let (data, new_pos) = Self::read_push_data(script, pos)?;
+            data_parts.push(data);
+            pos = new_pos;
+        }
+
+        if data_parts.len() < 3 {
+            return Err("Not enough data parts in script".to_string());
+        }
+
+        let protocol = data_parts.remove(0);
+        let mime_type = data_parts.remove(0);
+        let metadata = data_parts.remove(0);
+        let data_chunks = data_parts;
+
+        Ok((protocol, mime_type, metadata, data_chunks))
+    }
+
+    /// Read PUSHDATA from script at given position
+    fn read_push_data(script: &[u8], pos: usize) -> Result<(Vec<u8>, usize), String> {
+        if pos >= script.len() {
+            return Err("Unexpected end of script".to_string());
+        }
+
+        let opcode = script[pos];
+        let (data_len, data_start) = if opcode <= 75 {
+            // Direct push
+            (opcode as usize, pos + 1)
+        } else if opcode == 0x4c {
+            // OP_PUSHDATA1
+            if pos + 1 >= script.len() {
+                return Err("Missing length byte for OP_PUSHDATA1".to_string());
+            }
+            (script[pos + 1] as usize, pos + 2)
+        } else if opcode == 0x4d {
+            // OP_PUSHDATA2
+            if pos + 2 >= script.len() {
+                return Err("Missing length bytes for OP_PUSHDATA2".to_string());
+            }
+            let len = u16::from_le_bytes([script[pos + 1], script[pos + 2]]) as usize;
+            (len, pos + 3)
+        } else if opcode == 0x4e {
+            // OP_PUSHDATA4
+            if pos + 4 >= script.len() {
+                return Err("Missing length bytes for OP_PUSHDATA4".to_string());
+            }
+            let len = u32::from_le_bytes([
+                script[pos + 1],
+                script[pos + 2],
+                script[pos + 3],
+                script[pos + 4],
+            ]) as usize;
+            (len, pos + 5)
+        } else {
+            return Err(format!("Unexpected opcode: 0x{:02x}", opcode));
+        };
+
+        if data_start + data_len > script.len() {
+            return Err("Data extends beyond script".to_string());
+        }
+
+        let data = script[data_start..data_start + data_len].to_vec();
+        Ok((data, data_start + data_len))
+    }
+
     /// Push data with appropriate opcode
-    fn push_data(script: &mut Vec<u8>, data: &[u8]) {
+    pub fn push_data(script: &mut Vec<u8>, data: &[u8]) {
         let len = data.len();
 
         if len <= 75 {

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FLAC Status - Blockchain Audio Storage</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .status-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .status-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .status-header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 10px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            color: #888;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }
+
+        .nav-link:hover {
+            color: #00d4aa;
+            background: rgba(0, 212, 170, 0.1);
+        }
+
+        .status-card {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .status-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .status-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .status-message {
+            color: #888;
+            margin-bottom: 20px;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d4aa, #00a080);
+            transition: width 0.3s ease;
+        }
+
+        .result-section {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .result-section.visible {
+            display: block;
+        }
+
+        .txid-display {
+            background: #0d0d1a;
+            border-radius: 8px;
+            padding: 15px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.85rem;
+            margin-bottom: 20px;
+        }
+
+        .action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #00d4aa, #00a080);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .action-btn.secondary {
+            background: #333;
+        }
+
+        @media (max-width: 480px) {
+            .status-container {
+                padding: 15px;
+            }
+
+            .status-icon {
+                font-size: 48px;
+            }
+
+            .status-title {
+                font-size: 1.3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="status-container">
+        <nav class="nav-links">
+            <a href="/" class="nav-link">Dashboard</a>
+            <a href="/flac/upload" class="nav-link">Upload FLAC</a>
+            <a href="/flac/player" class="nav-link">Player</a>
+        </nav>
+
+        <div class="status-header">
+            <h1>🎵 FLAC Status</h1>
+        </div>
+
+        <div class="status-card">
+            <div class="status-icon" id="statusIcon">⏳</div>
+            <div class="status-title" id="statusTitle">Processing...</div>
+            <div class="status-message" id="statusMessage">Please wait...</div>
+            
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+            </div>
+
+            <div class="result-section" id="resultSection">
+                <div class="txid-display" id="txidDisplay">-</div>
+                <a class="action-btn" id="explorerBtn" href="#" target="_blank">🔗 View on Explorer</a>
+                <a class="action-btn secondary" id="playerBtn" href="#">🎧 Open in Player</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const jobId = '{{JOB_ID}}';
+        
+        async function checkStatus() {
+            try {
+                const response = await fetch(`/api/flac/status/${jobId}`);
+                const data = await response.json();
+
+                document.getElementById('statusMessage').textContent = data.message;
+                document.getElementById('progressFill').style.width = data.progress + '%';
+
+                if (data.status === 'complete') {
+                    document.getElementById('statusIcon').textContent = '✅';
+                    document.getElementById('statusTitle').textContent = 'Complete!';
+                    
+                    if (data.txid) {
+                        document.getElementById('resultSection').classList.add('visible');
+                        document.getElementById('txidDisplay').textContent = data.txid;
+                        document.getElementById('explorerBtn').href = `https://whatsonchain.com/tx/${data.txid}`;
+                        document.getElementById('playerBtn').href = `/flac/player?txid=${data.txid}`;
+                    }
+                    
+                    if (data.download_link) {
+                        document.getElementById('playerBtn').href = data.download_link;
+                    }
+                } else if (data.status === 'error') {
+                    document.getElementById('statusIcon').textContent = '❌';
+                    document.getElementById('statusTitle').textContent = 'Error';
+                } else {
+                    setTimeout(checkStatus, 2000);
+                }
+            } catch (error) {
+                console.error('Status check failed:', error);
+                setTimeout(checkStatus, 3000);
+            }
+        }
+
+        checkStatus();
+    </script>
+</body>
+</html>
