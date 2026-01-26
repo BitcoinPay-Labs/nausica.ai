@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upfile Protocol - Status</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i data-lucide="hard-drive"></i>
+            <span>Upfile Protocol</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">
+                <i data-lucide="layout-dashboard"></i>
+                Dashboard
+            </a>
+            <a href="/upload" class="nav-link">
+                <i data-lucide="upload"></i>
+                Upload
+            </a>
+            <a href="/download" class="nav-link">
+                <i data-lucide="download"></i>
+                Download
+            </a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <div class="page-header">
+            <h1 id="page-title">Job Status</h1>
+            <p id="page-subtitle">Monitoring job progress</p>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div id="status-content">
+                    <div class="loading">
+                        <i data-lucide="loader-2" class="spin"></i>
+                        Loading status...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        const jobId = window.location.pathname.split('/').pop();
+        let pollInterval = null;
+
+        async function updateStatus() {
+            try {
+                const response = await fetch(`/status_update/${jobId}`);
+                const data = await response.json();
+
+                if (!data.success) {
+                    showError(data.error || 'Failed to load status');
+                    return;
+                }
+
+                renderStatus(data);
+
+                // Stop polling if job is complete or error
+                if (data.status === 'complete' || data.status === 'error') {
+                    if (pollInterval) {
+                        clearInterval(pollInterval);
+                        pollInterval = null;
+                    }
+                }
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        function renderStatus(data) {
+            const container = document.getElementById('status-content');
+            const pageTitle = document.getElementById('page-title');
+            const pageSubtitle = document.getElementById('page-subtitle');
+
+            pageTitle.textContent = data.job_type === 'upload' ? 'Upload Status' : 'Download Status';
+            pageSubtitle.textContent = data.filename || 'Processing...';
+
+            if (data.status === 'pending_payment') {
+                container.innerHTML = `
+                    <div class="status-section">
+                        <div class="status-header">
+                            <span class="status-badge pending_payment">
+                                <i data-lucide="clock"></i>
+                                Waiting for Payment
+                            </span>
+                        </div>
+
+                        <div class="file-summary">
+                            <div class="summary-item">
+                                <span class="label">File:</span>
+                                <span class="value">${data.filename || '-'}</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="label">Size:</span>
+                                <span class="value">${formatFileSize(data.file_size)}</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="label">Required:</span>
+                                <span class="value highlight">${data.required_bsv} BSV</span>
+                            </div>
+                        </div>
+
+                        <div class="payment-section">
+                            <h3>Send Payment</h3>
+                            <p>Send exactly <strong>${data.required_bsv} BSV</strong> to:</p>
+                            
+                            <div class="address-box">
+                                <code id="payment-address">${data.payment_address}</code>
+                                <button class="btn btn-secondary btn-sm" onclick="copyAddress()">
+                                    <i data-lucide="copy"></i>
+                                </button>
+                            </div>
+
+                            ${data.qr_code ? `
+                                <div class="qr-code">
+                                    <img src="${data.qr_code}" alt="Payment QR Code">
+                                </div>
+                            ` : ''}
+
+                            <p class="payment-note">
+                                <i data-lucide="info"></i>
+                                Payment will be detected automatically. This page will update when payment is received.
+                            </p>
+                        </div>
+                    </div>
+                `;
+            } else if (data.status === 'processing') {
+                container.innerHTML = `
+                    <div class="status-section">
+                        <div class="status-header">
+                            <span class="status-badge processing">
+                                <i data-lucide="loader-2" class="spin"></i>
+                                Processing
+                            </span>
+                        </div>
+
+                        <div class="progress-section">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${data.progress}%"></div>
+                            </div>
+                            <p class="progress-text">${data.message}</p>
+                        </div>
+                    </div>
+                `;
+            } else if (data.status === 'complete') {
+                container.innerHTML = `
+                    <div class="status-section">
+                        <div class="status-header">
+                            <span class="status-badge complete">
+                                <i data-lucide="check-circle"></i>
+                                Complete
+                            </span>
+                        </div>
+
+                        <div class="complete-section">
+                            <div class="success-icon">
+                                <i data-lucide="check-circle-2"></i>
+                            </div>
+                            <h3>${data.job_type === 'upload' ? 'File Uploaded Successfully!' : 'File Downloaded Successfully!'}</h3>
+                            
+                            ${data.manifest_txid ? `
+                                <div class="result-item">
+                                    <span class="label">Manifest TXID:</span>
+                                    <div class="txid-box">
+                                        <code id="manifest-txid">${data.manifest_txid}</code>
+                                        <button class="btn btn-secondary btn-sm" onclick="copyTxid()">
+                                            <i data-lucide="copy"></i>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="action-buttons">
+                                    <a href="https://whatsonchain.com/tx/${data.manifest_txid}" target="_blank" class="btn btn-secondary">
+                                        <i data-lucide="external-link"></i>
+                                        View on Block Explorer
+                                    </a>
+                                </div>
+                            ` : ''}
+
+                            ${data.download_link ? `
+                                <div class="action-buttons">
+                                    <a href="${data.download_link}" class="btn btn-primary" download>
+                                        <i data-lucide="download"></i>
+                                        Download File
+                                    </a>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            } else if (data.status === 'error') {
+                container.innerHTML = `
+                    <div class="status-section">
+                        <div class="status-header">
+                            <span class="status-badge error">
+                                <i data-lucide="x-circle"></i>
+                                Error
+                            </span>
+                        </div>
+
+                        <div class="error-section">
+                            <div class="error-icon">
+                                <i data-lucide="alert-triangle"></i>
+                            </div>
+                            <h3>An Error Occurred</h3>
+                            <p class="error-message">${data.message}</p>
+                            
+                            <div class="action-buttons">
+                                <a href="${data.job_type === 'upload' ? '/upload' : '/download'}" class="btn btn-primary">
+                                    <i data-lucide="refresh-cw"></i>
+                                    Try Again
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            lucide.createIcons();
+        }
+
+        function showError(message) {
+            const container = document.getElementById('status-content');
+            container.innerHTML = `
+                <div class="error-state">
+                    <i data-lucide="alert-circle"></i>
+                    <p>${message}</p>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function formatFileSize(bytes) {
+            if (!bytes) return '-';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function copyAddress() {
+            const address = document.getElementById('payment-address').textContent;
+            navigator.clipboard.writeText(address);
+            alert('Address copied to clipboard!');
+        }
+
+        function copyTxid() {
+            const txid = document.getElementById('manifest-txid').textContent;
+            navigator.clipboard.writeText(txid);
+            alert('TXID copied to clipboard!');
+        }
+
+        // Initial load
+        updateStatus();
+
+        // Poll every 3 seconds
+        pollInterval = setInterval(updateStatus, 3000);
+    </script>
+</body>
+</html>

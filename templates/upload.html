@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upfile Protocol - Upload</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i data-lucide="hard-drive"></i>
+            <span>Upfile Protocol</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">
+                <i data-lucide="layout-dashboard"></i>
+                Dashboard
+            </a>
+            <a href="/upload" class="nav-link active">
+                <i data-lucide="upload"></i>
+                Upload
+            </a>
+            <a href="/download" class="nav-link">
+                <i data-lucide="download"></i>
+                Download
+            </a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <div class="page-header">
+            <h1>Upload File</h1>
+            <p>Store your file permanently on the BSV blockchain</p>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <form id="upload-form">
+                    <div class="upload-zone" id="upload-zone">
+                        <i data-lucide="upload-cloud"></i>
+                        <p>Drag and drop a file here, or click to select</p>
+                        <input type="file" id="file-input" hidden>
+                    </div>
+
+                    <div id="file-info" class="file-info hidden">
+                        <div class="file-details">
+                            <i data-lucide="file"></i>
+                            <div>
+                                <p class="file-name" id="file-name"></p>
+                                <p class="file-size" id="file-size"></p>
+                            </div>
+                        </div>
+                        <button type="button" id="remove-file" class="btn btn-secondary">
+                            <i data-lucide="x"></i>
+                        </button>
+                    </div>
+
+                    <div id="cost-info" class="cost-info hidden">
+                        <div class="cost-row">
+                            <span>Estimated Cost:</span>
+                            <span id="estimated-cost">-</span>
+                        </div>
+                        <p class="cost-note">Fee rate: 0.002 sats/byte</p>
+                    </div>
+
+                    <button type="submit" id="submit-btn" class="btn btn-primary btn-block" disabled>
+                        <i data-lucide="upload"></i>
+                        Prepare Upload
+                    </button>
+                </form>
+
+                <div id="error-message" class="error-message hidden"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileInfo = document.getElementById('file-info');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const costInfo = document.getElementById('cost-info');
+        const estimatedCost = document.getElementById('estimated-cost');
+        const submitBtn = document.getElementById('submit-btn');
+        const removeFile = document.getElementById('remove-file');
+        const uploadForm = document.getElementById('upload-form');
+        const errorMessage = document.getElementById('error-message');
+
+        let selectedFile = null;
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                handleFile(fileInput.files[0]);
+            }
+        });
+
+        removeFile.addEventListener('click', () => {
+            selectedFile = null;
+            fileInput.value = '';
+            uploadZone.classList.remove('hidden');
+            fileInfo.classList.add('hidden');
+            costInfo.classList.add('hidden');
+            submitBtn.disabled = true;
+        });
+
+        function handleFile(file) {
+            selectedFile = file;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+
+            // Calculate estimated cost
+            const txSize = 150 + file.size;
+            const fee = Math.ceil(txSize * 0.002);
+            const bsvAmount = fee / 100000000;
+            estimatedCost.textContent = `~${bsvAmount.toFixed(8)} BSV (${fee} sats)`;
+
+            uploadZone.classList.add('hidden');
+            fileInfo.classList.remove('hidden');
+            costInfo.classList.remove('hidden');
+            submitBtn.disabled = false;
+
+            lucide.createIcons();
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!selectedFile) return;
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> Preparing...';
+            lucide.createIcons();
+            errorMessage.classList.add('hidden');
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            try {
+                const response = await fetch('/prepare_upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.success && result.redirect_url) {
+                    window.location.href = result.redirect_url;
+                } else {
+                    throw new Error(result.error || 'Upload failed');
+                }
+            } catch (error) {
+                errorMessage.textContent = error.message;
+                errorMessage.classList.remove('hidden');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i data-lucide="upload"></i> Prepare Upload';
+                lucide.createIcons();
+            }
+        });
+    </script>
+</body>
+</html>

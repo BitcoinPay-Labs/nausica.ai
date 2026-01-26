@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upfile Protocol - Download</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i data-lucide="hard-drive"></i>
+            <span>Upfile Protocol</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link">
+                <i data-lucide="layout-dashboard"></i>
+                Dashboard
+            </a>
+            <a href="/upload" class="nav-link">
+                <i data-lucide="upload"></i>
+                Upload
+            </a>
+            <a href="/download" class="nav-link active">
+                <i data-lucide="download"></i>
+                Download
+            </a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <div class="page-header">
+            <h1>Download File</h1>
+            <p>Retrieve a file from the BSV blockchain using its TXID</p>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <form id="download-form">
+                    <div class="form-group">
+                        <label for="txid-input">Manifest TXID</label>
+                        <input 
+                            type="text" 
+                            id="txid-input" 
+                            name="txid"
+                            class="form-input" 
+                            placeholder="Enter the 64-character transaction ID"
+                            maxlength="64"
+                            pattern="[a-fA-F0-9]{64}"
+                            required
+                        >
+                        <p class="form-hint">The TXID is provided when you upload a file</p>
+                    </div>
+
+                    <button type="submit" id="submit-btn" class="btn btn-primary btn-block">
+                        <i data-lucide="download"></i>
+                        Start Download
+                    </button>
+                </form>
+
+                <div id="error-message" class="error-message hidden"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        const downloadForm = document.getElementById('download-form');
+        const txidInput = document.getElementById('txid-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const errorMessage = document.getElementById('error-message');
+
+        downloadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const txid = txidInput.value.trim();
+
+            if (txid.length !== 64 || !/^[a-fA-F0-9]+$/.test(txid)) {
+                errorMessage.textContent = 'Invalid TXID format. Must be 64 hex characters.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i data-lucide="loader-2" class="spin"></i> Starting...';
+            lucide.createIcons();
+            errorMessage.classList.add('hidden');
+
+            try {
+                const response = await fetch('/start_download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: `txid=${encodeURIComponent(txid)}`
+                });
+
+                const result = await response.json();
+
+                if (result.success && result.redirect_url) {
+                    window.location.href = result.redirect_url;
+                } else {
+                    throw new Error(result.error || 'Download failed');
+                }
+            } catch (error) {
+                errorMessage.textContent = error.message;
+                errorMessage.classList.remove('hidden');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i data-lucide="download"></i> Start Download';
+                lucide.createIcons();
+            }
+        });
+    </script>
+</body>
+</html>

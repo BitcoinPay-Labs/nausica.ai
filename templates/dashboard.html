@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upfile Protocol - Dashboard</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <i data-lucide="hard-drive"></i>
+            <span>Upfile Protocol</span>
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link active">
+                <i data-lucide="layout-dashboard"></i>
+                Dashboard
+            </a>
+            <a href="/upload" class="nav-link">
+                <i data-lucide="upload"></i>
+                Upload
+            </a>
+            <a href="/download" class="nav-link">
+                <i data-lucide="download"></i>
+                Download
+            </a>
+        </div>
+    </nav>
+
+    <main class="container">
+        <div class="page-header">
+            <h1>Dashboard</h1>
+            <p>View your upload and download history</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Job History</h2>
+                <button id="refresh-btn" class="btn btn-secondary">
+                    <i data-lucide="refresh-cw"></i>
+                    Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                <div id="jobs-container">
+                    <div class="loading">
+                        <i data-lucide="loader-2" class="spin"></i>
+                        Loading jobs...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        lucide.createIcons();
+
+        async function loadJobs() {
+            const container = document.getElementById('jobs-container');
+            
+            try {
+                const response = await fetch('/api/jobs');
+                const jobs = await response.json();
+
+                if (jobs.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i data-lucide="inbox"></i>
+                            <p>No jobs yet. Start by uploading a file!</p>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table class="jobs-table">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>File</th>
+                                <th>Status</th>
+                                <th>TXID</th>
+                                <th>Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${jobs.map(job => `
+                                <tr>
+                                    <td>
+                                        <span class="job-type ${job.job_type}">
+                                            <i data-lucide="${job.job_type === 'upload' ? 'upload' : 'download'}"></i>
+                                            ${job.job_type}
+                                        </span>
+                                    </td>
+                                    <td>${job.filename || '-'}</td>
+                                    <td>
+                                        <span class="status-badge ${job.status}">
+                                            ${job.status.replace('_', ' ')}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        ${job.manifest_txid ? `
+                                            <span class="txid" title="${job.manifest_txid}">
+                                                ${job.manifest_txid.substring(0, 8)}...
+                                            </span>
+                                        ` : '-'}
+                                    </td>
+                                    <td>${new Date(job.created_at).toLocaleString()}</td>
+                                    <td>
+                                        <div class="action-buttons">
+                                            <a href="/status/${job.id}" class="btn btn-sm btn-secondary">
+                                                <i data-lucide="eye"></i>
+                                            </a>
+                                            ${job.manifest_txid ? `
+                                                <button class="btn btn-sm btn-secondary" onclick="copyTxid('${job.manifest_txid}')">
+                                                    <i data-lucide="copy"></i>
+                                                </button>
+                                                <a href="https://whatsonchain.com/tx/${job.manifest_txid}" target="_blank" class="btn btn-sm btn-secondary">
+                                                    <i data-lucide="external-link"></i>
+                                                </a>
+                                            ` : ''}
+                                        </div>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+                lucide.createIcons();
+            } catch (error) {
+                container.innerHTML = `
+                    <div class="error-state">
+                        <i data-lucide="alert-circle"></i>
+                        <p>Failed to load jobs: ${error.message}</p>
+                    </div>
+                `;
+                lucide.createIcons();
+            }
+        }
+
+        function copyTxid(txid) {
+            navigator.clipboard.writeText(txid);
+            alert('TXID copied to clipboard!');
+        }
+
+        document.getElementById('refresh-btn').addEventListener('click', loadJobs);
+        loadJobs();
+    </script>
+</body>
+</html>
