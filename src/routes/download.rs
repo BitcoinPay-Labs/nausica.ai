@@ -9,7 +9,6 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::models::Job;
-use crate::services::job::process_download;
 use crate::AppState;
 
 pub async fn download_page() -> Html<String> {
@@ -66,7 +65,7 @@ pub async fn start_download(
     let state_clone = state.clone();
     let job_id_clone = job_id.clone();
     tokio::spawn(async move {
-        process_download(state_clone, job_id_clone, txid).await;
+        crate::process_download(state_clone, job_id_clone, Some(txid)).await;
     });
 
     Json(StartDownloadResponse {

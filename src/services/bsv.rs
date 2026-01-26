@@ -499,3 +499,164 @@ impl BsvService {
         }
     }
 }
+
+impl BsvService {
+    /// Create FLAC chunk script for multi-transaction storage
+    /// Format:
+    ///   OP_FALSE (0x00)
+    ///   OP_IF (0x63)
+    ///     PUSHDATA "flacstore-chunk"
+    ///     PUSHDATA <chunk_index as 4-byte LE>
+    ///     PUSHDATA <data>
+    ///   OP_ENDIF (0x68)
+    pub fn create_flac_chunk_script(chunk_index: u32, _total_chunks: u32, data: &[u8]) -> Vec<u8> {
+        let mut script = Vec::new();
+
+        // OP_FALSE OP_IF
+        script.push(0x00); // OP_FALSE
+        script.push(0x63); // OP_IF
+
+        // Protocol identifier
+        Self::push_data(&mut script, b"flacstore-chunk");
+
+        // Chunk index (as string for easier parsing)
+        Self::push_data(&mut script, chunk_index.to_string().as_bytes());
+
+        // Data
+        Self::push_data(&mut script, data);
+
+        // OP_ENDIF
+        script.push(0x68);
+
+        script
+    }
+
+    /// Create FLAC manifest script that references chunk transactions
+    /// Format:
+    ///   OP_FALSE (0x00)
+    ///   OP_IF (0x63)
+    ///     PUSHDATA "flacstore-manifest"
+    ///     PUSHDATA <filename>
+    ///     PUSHDATA <metadata JSON>
+    ///     PUSHDATA <chunk_txid_1>
+    ///     PUSHDATA <chunk_txid_2>
+    ///     ...
+    ///   OP_ENDIF (0x68)
+    pub fn create_flac_manifest_script(
+        filename: &str,
+        file_size: usize,
+        chunk_txids: &[String],
+    ) -> Vec<u8> {
+        let mut script = Vec::new();
+
+        // OP_FALSE OP_IF
+        script.push(0x00); // OP_FALSE
+        script.push(0x63); // OP_IF
+
+        // Protocol identifier
+        Self::push_data(&mut script, b"flacstore-manifest");
+
+        // Filename
+        Self::push_data(&mut script, filename.as_bytes());
+
+        // Metadata JSON
+        let metadata = serde_json::json!({
+            "size": file_size,
+            "chunks": chunk_txids.len(),
+            "version": "1.0",
+            "mime": "audio/flac"
+        }).to_string();
+        Self::push_data(&mut script, metadata.as_bytes());
+
+        // Chunk TXIDs
+        for txid in chunk_txids {
+            Self::push_data(&mut script, txid.as_bytes());
+        }
+
+        // OP_ENDIF
+        script.push(0x68);
+
+        script
+    }
+}
+
+
+impl BsvService {
+    /// Create a UTXO split transaction that divides one UTXO into multiple outputs
+    /// This is used to prepare for multi-chunk uploads where each chunk needs its own UTXO
+    /// 
+    /// Returns: (raw_tx_hex, Vec<(output_index, satoshis)>)
+    pub fn create_split_transaction(
+        &self,
+        wif: &str,
+        input_txid: &str,
+        input_vout: u32,
+        input_satoshis: i64,
+        script_pubkey: &[u8],
+        num_outputs: usize,
+        satoshis_per_output: i64,
+    ) -> Result<String, String> {
+        // Calculate total needed for outputs
+        let total_output = satoshis_per_output * num_outputs as i64;
+        
+        // Estimate transaction size: ~10 bytes overhead + ~148 bytes per input + ~34 bytes per output
+        let tx_size = 10 + 148 + (34 * num_outputs);
+        let fee = (tx_size as f64 * self.fee_rate).ceil() as i64;
+        
+        if input_satoshis < total_output + fee {
+            return Err(format!(
+                "Insufficient funds for split: {} < {} + {}",
+                input_satoshis, total_output, fee
+            ));
+        }
+        
+        // Create outputs
+        let mut outputs: Vec<(Vec<u8>, i64)> = Vec::new();
+        for _ in 0..num_outputs {
+            outputs.push((script_pubkey.to_vec(), satoshis_per_output));
+        }
+        
+        // Add change output if there's any remaining
+        let change = input_satoshis - total_output - fee;
+        if change > 546 {
+            outputs.push((script_pubkey.to_vec(), change));
+        }
+        
+        // Create the transaction
+        let utxos = vec![(input_txid.to_string(), input_vout, input_satoshis, script_pubkey.to_vec())];
+        self.create_transaction(wif, &utxos, &outputs)
+    }
+    
+    /// Calculate the required satoshis per output for a split transaction
+    /// Each output needs to cover the chunk transaction fee + 1 satoshi for data output
+    pub fn calculate_chunk_output_satoshis(&self, chunk_size: usize) -> i64 {
+        // Chunk transaction size: ~150 bytes overhead + chunk data size
+        let chunk_tx_size = 200 + chunk_size;
+        let chunk_fee = (chunk_tx_size as f64 * self.fee_rate).ceil() as i64;
+        
+        // Need fee + 1 satoshi for data output + small buffer
+        chunk_fee + 10
+    }
+    
+    /// Calculate total cost for multi-chunk upload
+    /// Returns (total_satoshis, satoshis_per_chunk, num_chunks)
+    pub fn calculate_multi_chunk_cost(&self, file_size: usize, chunk_size: usize) -> (i64, i64, usize) {
+        let num_chunks = (file_size + chunk_size - 1) / chunk_size;
+        let satoshis_per_chunk = self.calculate_chunk_output_satoshis(chunk_size);
+        
+        // Number of outputs in split transaction: num_chunks + 1 (for manifest)
+        let num_outputs = num_chunks + 1;
+        
+        // Split transaction cost
+        let split_tx_size = 10 + 148 + (34 * num_outputs);
+        let split_fee = (split_tx_size as f64 * self.fee_rate).ceil() as i64;
+        
+        // Total output value needed for split transaction
+        let split_output_total = satoshis_per_chunk * num_outputs as i64;
+        
+        // Total = split outputs + split fee
+        let total = split_output_total + split_fee;
+        
+        (total, satoshis_per_chunk, num_chunks)
+    }
+}

@@ -10,11 +10,13 @@ pub struct AddressBalance {
     pub count: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Utxo {
     pub txid: String,
     pub vout: u32,
     pub satoshis: i64,
+    #[serde(default)]
+    pub script_pubkey: String,
     pub blockheight: Option<i64>,
     pub confirmations: Option<i64>,
 }
@@ -136,11 +138,24 @@ impl BitailsClient {
     }
 
     pub async fn broadcast_transaction(&self, raw_tx_hex: &str) -> Result<String, String> {
+        // Try Bitails first
+        match self.broadcast_via_bitails(raw_tx_hex).await {
+            Ok(txid) => return Ok(txid),
+            Err(e) => {
+                tracing::warn!("Bitails broadcast failed: {}, trying WhatsOnChain...", e);
+            }
+        }
+        
+        // Fallback to WhatsOnChain
+        self.broadcast_via_whatsonchain(raw_tx_hex).await
+    }
+    
+    async fn broadcast_via_bitails(&self, raw_tx_hex: &str) -> Result<String, String> {
         let url = format!("{}/tx/broadcast", self.base_url);
         let response = self
             .build_post_request(&url)
             .header("Content-Type", "application/json")
-            .body(format!(r#"{{"raw":"{}"}}"#, raw_tx_hex))
+            .body(format!("{{\"raw\":\"{}\"}}", raw_tx_hex))
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
@@ -171,6 +186,36 @@ impl BitailsClient {
         
         Err(format!("Unexpected response: {}", response_text))
     }
+    
+    async fn broadcast_via_whatsonchain(&self, raw_tx_hex: &str) -> Result<String, String> {
+        let url = "https://api.whatsonchain.com/v1/bsv/main/tx/raw";
+        let response = self.client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .body(format!("{{\"txhex\":\"{}\"}}", raw_tx_hex))
+            .send()
+            .await
+            .map_err(|e| format!("WoC request failed: {}", e))?;
+
+        let response_text = response.text().await.unwrap_or_default();
+        
+        // WhatsOnChain returns the txid directly as a quoted string
+        let trimmed = response_text.trim().trim_matches('"');
+        if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            tracing::info!("Broadcast via WhatsOnChain successful: {}", trimmed);
+            return Ok(trimmed.to_string());
+        }
+        
+        // Check for error response
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+            if let Some(error) = json.get("error") {
+                return Err(format!("WoC broadcast failed: {}", error));
+            }
+        }
+        
+        Err(format!("WoC unexpected response: {}", response_text))
+    }
+    
     pub async fn get_transaction(&self, txid: &str) -> Result<Transaction, String> {
         let url = format!("{}/tx/{}", self.base_url, txid);
         let response = self
@@ -208,7 +253,7 @@ impl BitailsClient {
             .map_err(|e| format!("Download error: {}", e))
     }
 
-    pub async fn download_tx_raw(&self, txid: &str) -> Result<Vec<u8>, String> {
+    pub async fn download_tx_raw(&self, txid: &str) -> Result<String, String> {
         let url = format!("{}/download/tx/{}", self.base_url, txid);
         let response = self
             .build_request(&url)
@@ -220,10 +265,12 @@ impl BitailsClient {
             return Err(format!("API error: {}", response.status()));
         }
 
-        response
+        // The API returns raw binary transaction data, convert to hex
+        let bytes = response
             .bytes()
             .await
-            .map(|b| b.to_vec())
-            .map_err(|e| format!("Download error: {}", e))
+            .map_err(|e| format!("Download error: {}", e))?;
+        
+        Ok(hex::encode(&bytes))
     }
 }

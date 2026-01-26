@@ -9,7 +9,6 @@ use tokio::sync::RwLock;
 
 use crate::models::{Job, JobStatus, JobType};
 use crate::services::bsv::BsvService;
-use crate::services::job::process_flac_download;
 use crate::AppState;
 
 /// FLAC upload page
@@ -95,9 +94,21 @@ pub async fn prepare_flac_upload(
     let (wif, address) = BsvService::generate_keypair();
 
     // Calculate required satoshis
+    // For large files, we need to account for UTXO splitting and multiple chunk transactions
+    let max_chunk_size = 1024 * 1024; // 1MB chunks
+    let file_size = file_data.len();
+    
     let required_satoshis = {
         let state = state.read().await;
-        state.bsv.calculate_upload_cost(file_data.len())
+        if file_size > max_chunk_size {
+            // Multi-chunk upload: use calculate_multi_chunk_cost
+            let (total, _, _) = state.bsv.calculate_multi_chunk_cost(file_size, max_chunk_size);
+            // Add 20% buffer for safety
+            (total as f64 * 1.2).ceil() as i64
+        } else {
+            // Single transaction upload
+            state.bsv.calculate_upload_cost(file_size)
+        }
     };
 
     // Create job
@@ -106,7 +117,7 @@ pub async fn prepare_flac_upload(
 
     let job = Job {
         id: job_id.clone(),
-        job_type: JobType::Upload,
+        job_type: JobType::FlacUpload,
         status: JobStatus::PendingPayment,
         filename: Some(filename),
         file_size: Some(file_data.len() as i64),
@@ -186,7 +197,7 @@ pub async fn start_flac_download(
 
     let job = Job {
         id: job_id.clone(),
-        job_type: JobType::Download,
+        job_type: JobType::FlacDownload,
         status: JobStatus::Processing,
         filename: None,
         file_size: None,
@@ -220,7 +231,7 @@ pub async fn start_flac_download(
     let state_clone = state.clone();
     let job_id_clone = job_id.clone();
     tokio::spawn(async move {
-        process_flac_download(state_clone, job_id_clone, txid).await;
+        crate::process_flac_download(state_clone, job_id_clone, Some(txid)).await;
     });
 
     (

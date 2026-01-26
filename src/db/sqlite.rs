@@ -94,6 +94,26 @@ impl Database {
         }
     }
 
+    pub fn get_processing_jobs(&self) -> Result<Vec<Job>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, job_type, status, filename, file_size, file_data,
+                    payment_address, payment_wif, required_satoshis,
+                    manifest_txid, download_link, message, progress,
+                    created_at, updated_at
+             FROM jobs WHERE status = 'processing'",
+        )?;
+
+        let mut jobs = Vec::new();
+        let mut rows = stmt.query([])?;
+
+        while let Some(row) = rows.next()? {
+            jobs.push(self.row_to_job(row)?);
+        }
+
+        Ok(jobs)
+    }
+
     pub fn get_pending_payment_jobs(&self) -> Result<Vec<Job>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -142,6 +162,15 @@ impl Database {
         }
 
         Ok(jobs)
+    }
+
+    pub fn update_job_status_only(&self, id: &str, status: JobStatus) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            params![status.as_str(), Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
     }
 
     pub fn update_job_status(&self, id: &str, status: JobStatus, message: &str) -> Result<()> {
