@@ -6,6 +6,7 @@ mod services;
 
 use axum::{
     extract::DefaultBodyLimit,
+    response::Html,
     routing::{get, post},
     Router,
 };
@@ -19,6 +20,10 @@ use crate::db::Database;
 use crate::models::job::JobType;
 use crate::services::bitails::{BitailsClient, Utxo};
 use crate::services::bsv::BsvService;
+
+async fn index_page() -> Html<String> {
+    Html(include_str!("../templates/index.html").to_string())
+}
 
 pub struct AppState {
     pub db: Database,
@@ -65,15 +70,8 @@ async fn main() {
     // Build router with increased body limit for large files (50MB)
     let app = Router::new()
         // Pages
-        .route("/", get(routes::dashboard::dashboard_page))
-        .route("/upload", get(routes::upload::upload_page))
-        .route("/download", get(routes::download::download_page))
+        .route("/", get(index_page))
         .route("/status/:job_id", get(routes::status::status_page))
-        // FLAC pages
-        .route("/flac", get(routes::flac::flac_upload_page))
-        .route("/flac/upload", get(routes::flac::flac_upload_page))
-        .route("/flac/player", get(routes::flac::flac_player_page))
-        .route("/flac/status/:job_id", get(routes::flac::flac_status_page))
         // API endpoints
         .route("/prepare_upload", post(routes::upload::prepare_upload))
         .route("/start_download", post(routes::download::start_download))

@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Siner Network - Blockchain Audio Storage</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0a0a0f 100%);
+            min-height: 100vh;
+            color: #fff;
+        }
+
+        .container {
+            max-width: 480px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 40px 0 30px;
+        }
+
+        .logo {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00d4aa, #00a8ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+        }
+
+        .tagline {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        /* Tab Navigation */
+        .tabs {
+            display: flex;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 24px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+            color: #888;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #00d4aa, #00a8ff);
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .tab:not(.active):hover {
+            color: #fff;
+        }
+
+        /* Tab Content */
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Upload Section */
+        .upload-zone {
+            border: 2px dashed #333;
+            border-radius: 16px;
+            padding: 50px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .upload-zone:hover,
+        .upload-zone.dragover {
+            border-color: #00d4aa;
+            background: rgba(0, 212, 170, 0.05);
+        }
+
+        .upload-zone.has-file {
+            border-color: #00d4aa;
+            border-style: solid;
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .upload-text {
+            color: #ccc;
+            margin-bottom: 8px;
+        }
+
+        .upload-hint {
+            color: #555;
+            font-size: 0.8rem;
+        }
+
+        /* File Info Card */
+        .file-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .file-card.visible {
+            display: block;
+        }
+
+        .file-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #1a1a1a;
+        }
+
+        .file-row:last-child {
+            border-bottom: none;
+        }
+
+        .file-label {
+            color: #666;
+            font-size: 0.85rem;
+        }
+
+        .file-value {
+            color: #fff;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .file-value.highlight {
+            color: #00d4aa;
+        }
+
+        /* Payment Section */
+        .payment-section {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            display: none;
+        }
+
+        .payment-section.visible {
+            display: block;
+        }
+
+        .payment-title {
+            font-size: 0.9rem;
+            color: #888;
+            margin-bottom: 12px;
+        }
+
+        .payment-amount {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #00d4aa;
+            margin-bottom: 16px;
+        }
+
+        .qr-container {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            display: inline-block;
+            margin-bottom: 16px;
+        }
+
+        .qr-container canvas {
+            display: block;
+        }
+
+        .address-box {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 0.75rem;
+            word-break: break-all;
+            color: #aaa;
+            margin-bottom: 12px;
+        }
+
+        .copy-btn {
+            background: transparent;
+            border: 1px solid #333;
+            color: #888;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.3s ease;
+        }
+
+        .copy-btn:hover {
+            border-color: #00d4aa;
+            color: #00d4aa;
+        }
+
+        /* Progress */
+        .progress-section {
+            display: none;
+        }
+
+        .progress-section.visible {
+            display: block;
+        }
+
+        .progress-bar {
+            background: #1a1a1a;
+            border-radius: 8px;
+            height: 8px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+
+        .progress-fill {
+            background: linear-gradient(90deg, #00d4aa, #00a8ff);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        /* Success */
+        .success-section {
+            text-align: center;
+            display: none;
+        }
+
+        .success-section.visible {
+            display: block;
+        }
+
+        .success-icon {
+            font-size: 64px;
+            margin-bottom: 16px;
+        }
+
+        .success-title {
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+        }
+
+        .txid-box {
+            background: rgba(0, 212, 170, 0.1);
+            border: 1px solid #00d4aa;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 16px 0;
+        }
+
+        .txid-label {
+            color: #888;
+            font-size: 0.75rem;
+            margin-bottom: 4px;
+        }
+
+        .txid-value {
+            font-family: monospace;
+            font-size: 0.8rem;
+            word-break: break-all;
+            color: #00d4aa;
+        }
+
+        .play-btn {
+            background: linear-gradient(135deg, #00d4aa, #00a8ff);
+            border: none;
+            color: #fff;
+            padding: 14px 32px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin-top: 16px;
+        }
+
+        .play-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 212, 170, 0.3);
+        }
+
+        /* Play Section */
+        .play-input-group {
+            margin-bottom: 20px;
+        }
+
+        .play-input-label {
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .play-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 14px 16px;
+            color: #fff;
+            font-size: 0.9rem;
+            font-family: monospace;
+            transition: all 0.3s ease;
+        }
+
+        .play-input:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+
+        .play-input::placeholder {
+            color: #444;
+        }
+
+        .load-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #00d4aa, #00a8ff);
+            border: none;
+            color: #fff;
+            padding: 14px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .load-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 212, 170, 0.3);
+        }
+
+        .load-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Audio Player */
+        .player-section {
+            display: none;
+        }
+
+        .player-section.visible {
+            display: block;
+        }
+
+        .player-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid #222;
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+        }
+
+        .player-artwork {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(135deg, #1a1a2e, #2a2a4e);
+            border-radius: 12px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+        }
+
+        .player-title {
+            font-size: 1rem;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .player-subtitle {
+            color: #666;
+            font-size: 0.8rem;
+            margin-bottom: 20px;
+        }
+
+        .player-progress {
+            margin-bottom: 16px;
+        }
+
+        .player-progress-bar {
+            background: #1a1a1a;
+            border-radius: 4px;
+            height: 4px;
+            cursor: pointer;
+            margin-bottom: 8px;
+        }
+
+        .player-progress-fill {
+            background: #00d4aa;
+            height: 100%;
+            width: 0%;
+            border-radius: 4px;
+            transition: width 0.1s linear;
+        }
+
+        .player-time {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #666;
+        }
+
+        .player-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 24px;
+        }
+
+        .control-btn {
+            background: transparent;
+            border: none;
+            color: #888;
+            font-size: 24px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            padding: 8px;
+        }
+
+        .control-btn:hover {
+            color: #fff;
+        }
+
+        .control-btn.play-pause {
+            background: linear-gradient(135deg, #00d4aa, #00a8ff);
+            color: #fff;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            font-size: 20px;
+        }
+
+        .control-btn.play-pause:hover {
+            transform: scale(1.05);
+        }
+
+        .player-volume {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 20px;
+        }
+
+        .volume-icon {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .volume-slider {
+            width: 100px;
+            height: 4px;
+            -webkit-appearance: none;
+            background: #1a1a1a;
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            background: #00d4aa;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        /* Download Status */
+        .download-status {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .download-status.visible {
+            display: block;
+        }
+
+        .download-status-text {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 30px 0;
+            color: #444;
+            font-size: 0.75rem;
+        }
+
+        /* Hidden */
+        .hidden {
+            display: none !important;
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #333;
+            border-top-color: #00d4aa;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="logo">Siner Network</h1>
+            <p class="tagline">Store your music on the blockchain forever</p>
+        </header>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="upload">Upload</div>
+            <div class="tab" data-tab="play">Play</div>
+        </div>
+
+        <!-- Upload Tab -->
+        <div id="upload-tab" class="tab-content active">
+            <div id="upload-section">
+                <div class="upload-zone" id="upload-zone">
+                    <div class="upload-icon">🎵</div>
+                    <div class="upload-text">Drop your FLAC file here</div>
+                    <div class="upload-hint">or tap to select</div>
+                </div>
+                <input type="file" id="file-input" accept=".flac" style="display: none;">
+
+                <div class="file-card" id="file-card">
+                    <div class="file-row">
+                        <span class="file-label">File</span>
+                        <span class="file-value" id="file-name">-</span>
+                    </div>
+                    <div class="file-row">
+                        <span class="file-label">Size</span>
+                        <span class="file-value" id="file-size">-</span>
+                    </div>
+                    <div class="file-row">
+                        <span class="file-label">Cost</span>
+                        <span class="file-value highlight" id="file-cost">-</span>
+                    </div>
+                </div>
+
+                <div class="payment-section" id="payment-section">
+                    <div class="payment-title">Send payment to continue</div>
+                    <div class="payment-amount" id="payment-amount">-</div>
+                    <div class="qr-container">
+                        <canvas id="qr-code"></canvas>
+                    </div>
+                    <div class="address-box" id="payment-address">-</div>
+                    <button class="copy-btn" id="copy-btn">Copy Address</button>
+                </div>
+
+                <div class="progress-section" id="progress-section">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <div class="progress-text" id="progress-text">Processing...</div>
+                </div>
+
+                <div class="success-section" id="success-section">
+                    <div class="success-icon">✅</div>
+                    <div class="success-title">Upload Complete!</div>
+                    <div class="txid-box">
+                        <div class="txid-label">Transaction ID</div>
+                        <div class="txid-value" id="success-txid">-</div>
+                    </div>
+                    <button class="play-btn" id="play-uploaded-btn">Play Now</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Play Tab -->
+        <div id="play-tab" class="tab-content">
+            <div class="play-input-group">
+                <label class="play-input-label">Enter Transaction ID</label>
+                <input type="text" class="play-input" id="txid-input" placeholder="Enter TXID to play...">
+            </div>
+            <button class="load-btn" id="load-btn">Load Audio</button>
+
+            <div class="download-status" id="download-status">
+                <div class="spinner"></div>
+                <div class="download-status-text" id="download-status-text">Loading...</div>
+            </div>
+
+            <div class="player-section" id="player-section">
+                <div class="player-card">
+                    <div class="player-artwork">🎵</div>
+                    <div class="player-title" id="player-title">-</div>
+                    <div class="player-subtitle" id="player-subtitle">FLAC Audio</div>
+                    
+                    <div class="player-progress">
+                        <div class="player-progress-bar" id="player-progress-bar">
+                            <div class="player-progress-fill" id="player-progress-fill"></div>
+                        </div>
+                        <div class="player-time">
+                            <span id="player-current-time">0:00</span>
+                            <span id="player-duration">0:00</span>
+                        </div>
+                    </div>
+
+                    <div class="player-controls">
+                        <button class="control-btn" id="rewind-btn">⏪</button>
+                        <button class="control-btn play-pause" id="play-pause-btn">▶</button>
+                        <button class="control-btn" id="forward-btn">⏩</button>
+                    </div>
+
+                    <div class="player-volume">
+                        <span class="volume-icon">🔊</span>
+                        <input type="range" class="volume-slider" id="volume-slider" min="0" max="100" value="80">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            Powered by BSV Blockchain
+        </footer>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <script>
+        // State
+        let currentJobId = null;
+        let statusInterval = null;
+        let downloadJobId = null;
+        let downloadInterval = null;
+        let audio = null;
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab + '-tab').classList.add('active');
+            });
+        });
+
+        // Upload Zone
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput = document.getElementById('file-input');
+
+        uploadZone.addEventListener('click', () => fileInput.click());
+        uploadZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadZone.classList.add('dragover');
+        });
+        uploadZone.addEventListener('dragleave', () => {
+            uploadZone.classList.remove('dragover');
+        });
+        uploadZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                handleFile(fileInput.files[0]);
+            }
+        });
+
+        async function handleFile(file) {
+            if (!file.name.toLowerCase().endsWith('.flac')) {
+                alert('Please select a FLAC file');
+                return;
+            }
+
+            uploadZone.classList.add('has-file');
+            document.getElementById('file-name').textContent = file.name;
+            document.getElementById('file-size').textContent = formatSize(file.size);
+            document.getElementById('file-card').classList.add('visible');
+
+            // Upload file and get payment info
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/flac/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    currentJobId = data.job_id;
+                    document.getElementById('file-cost').textContent = data.required_bsv + ' BSV';
+                    document.getElementById('payment-amount').textContent = data.required_bsv + ' BSV';
+                    document.getElementById('payment-address').textContent = data.payment_address;
+                    
+                    // Generate QR code
+                    QRCode.toCanvas(document.getElementById('qr-code'), data.payment_address, {
+                        width: 180,
+                        margin: 0,
+                        color: { dark: '#000000', light: '#ffffff' }
+                    });
+
+                    document.getElementById('payment-section').classList.add('visible');
+                    startStatusPolling();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Upload failed: ' + error.message);
+            }
+        }
+
+        function startStatusPolling() {
+            if (statusInterval) clearInterval(statusInterval);
+            statusInterval = setInterval(checkStatus, 3000);
+        }
+
+        async function checkStatus() {
+            if (!currentJobId) return;
+
+            try {
+                const response = await fetch(`/api/flac/status/${currentJobId}`);
+                const data = await response.json();
+
+                if (data.status === 'processing' || data.status === 'uploading') {
+                    document.getElementById('payment-section').classList.remove('visible');
+                    document.getElementById('progress-section').classList.add('visible');
+                    document.getElementById('progress-fill').style.width = data.progress + '%';
+                    document.getElementById('progress-text').textContent = data.message;
+                } else if (data.status === 'completed') {
+                    clearInterval(statusInterval);
+                    document.getElementById('progress-section').classList.remove('visible');
+                    document.getElementById('success-section').classList.add('visible');
+                    document.getElementById('success-txid').textContent = data.txid;
+                }
+            } catch (error) {
+                console.error('Status check failed:', error);
+            }
+        }
+
+        // Copy address
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const address = document.getElementById('payment-address').textContent;
+            navigator.clipboard.writeText(address);
+            document.getElementById('copy-btn').textContent = 'Copied!';
+            setTimeout(() => {
+                document.getElementById('copy-btn').textContent = 'Copy Address';
+            }, 2000);
+        });
+
+        // Play uploaded file
+        document.getElementById('play-uploaded-btn').addEventListener('click', () => {
+            const txid = document.getElementById('success-txid').textContent;
+            document.getElementById('txid-input').value = txid;
+            document.querySelectorAll('.tab')[1].click();
+            loadAudio();
+        });
+
+        // Load audio button
+        document.getElementById('load-btn').addEventListener('click', loadAudio);
+        document.getElementById('txid-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') loadAudio();
+        });
+
+        async function loadAudio() {
+            const txid = document.getElementById('txid-input').value.trim();
+            if (!txid) {
+                alert('Please enter a Transaction ID');
+                return;
+            }
+
+            document.getElementById('load-btn').disabled = true;
+            document.getElementById('download-status').classList.add('visible');
+            document.getElementById('player-section').classList.remove('visible');
+
+            try {
+                // Start download
+                const response = await fetch('/api/flac/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ txid })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    downloadJobId = data.job_id;
+                    startDownloadPolling();
+                } else {
+                    throw new Error(data.error || 'Download failed');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+                document.getElementById('load-btn').disabled = false;
+                document.getElementById('download-status').classList.remove('visible');
+            }
+        }
+
+        function startDownloadPolling() {
+            if (downloadInterval) clearInterval(downloadInterval);
+            downloadInterval = setInterval(checkDownloadStatus, 2000);
+        }
+
+        async function checkDownloadStatus() {
+            if (!downloadJobId) return;
+
+            try {
+                const response = await fetch(`/api/flac/status/${downloadJobId}`);
+                const data = await response.json();
+
+                document.getElementById('download-status-text').textContent = data.message;
+
+                if (data.status === 'completed') {
+                    clearInterval(downloadInterval);
+                    document.getElementById('download-status').classList.remove('visible');
+                    document.getElementById('load-btn').disabled = false;
+                    
+                    // Load audio player
+                    initPlayer(data.download_link, data.filename);
+                } else if (data.status === 'error') {
+                    clearInterval(downloadInterval);
+                    document.getElementById('download-status').classList.remove('visible');
+                    document.getElementById('load-btn').disabled = false;
+                    alert('Download failed: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Download status check failed:', error);
+            }
+        }
+
+        function initPlayer(audioUrl, filename) {
+            if (audio) {
+                audio.pause();
+                audio = null;
+            }
+
+            audio = new Audio(audioUrl);
+            audio.volume = document.getElementById('volume-slider').value / 100;
+
+            document.getElementById('player-title').textContent = filename || 'Unknown';
+            document.getElementById('player-section').classList.add('visible');
+
+            audio.addEventListener('loadedmetadata', () => {
+                document.getElementById('player-duration').textContent = formatTime(audio.duration);
+            });
+
+            audio.addEventListener('timeupdate', () => {
+                const progress = (audio.currentTime / audio.duration) * 100;
+                document.getElementById('player-progress-fill').style.width = progress + '%';
+                document.getElementById('player-current-time').textContent = formatTime(audio.currentTime);
+            });
+
+            audio.addEventListener('ended', () => {
+                document.getElementById('play-pause-btn').textContent = '▶';
+            });
+        }
+
+        // Player controls
+        document.getElementById('play-pause-btn').addEventListener('click', () => {
+            if (!audio) return;
+            if (audio.paused) {
+                audio.play();
+                document.getElementById('play-pause-btn').textContent = '⏸';
+            } else {
+                audio.pause();
+                document.getElementById('play-pause-btn').textContent = '▶';
+            }
+        });
+
+        document.getElementById('rewind-btn').addEventListener('click', () => {
+            if (audio) audio.currentTime = Math.max(0, audio.currentTime - 10);
+        });
+
+        document.getElementById('forward-btn').addEventListener('click', () => {
+            if (audio) audio.currentTime = Math.min(audio.duration, audio.currentTime + 10);
+        });
+
+        document.getElementById('volume-slider').addEventListener('input', (e) => {
+            if (audio) audio.volume = e.target.value / 100;
+        });
+
+        document.getElementById('player-progress-bar').addEventListener('click', (e) => {
+            if (!audio) return;
+            const rect = e.target.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            audio.currentTime = percent * audio.duration;
+        });
+
+        // Utility functions
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return mins + ':' + secs.toString().padStart(2, '0');
+        }
+    </script>
+</body>
+</html>
