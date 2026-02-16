@@ -83,6 +83,11 @@ async fn main() {
         .route("/api/flac/upload", post(routes::flac::prepare_flac_upload))
         .route("/api/flac/download", post(routes::flac::start_flac_download))
         .route("/api/flac/status/:job_id", get(routes::flac::get_flac_status))
+        // Wallet API endpoints
+        .route("/api/wallet/generate", post(routes::wallet::generate_wallet))
+        .route("/api/wallet/import", post(routes::wallet::import_wif))
+        .route("/api/wallet/balance", post(routes::wallet::get_balance))
+        .route("/api/wallet/send", post(routes::wallet::send_bsv))
         // Static files and downloads
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/downloads", ServeDir::new("./data/downloads"))

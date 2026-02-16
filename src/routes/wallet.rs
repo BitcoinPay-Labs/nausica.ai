@@ -1,0 +1,266 @@
+use axum::{
+    extract::State,
+    response::Json,
+    http::StatusCode,
+};
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use crate::AppState;
+use crate::services::bsv::BsvService;
+
+#[derive(Deserialize)]
+pub struct GenerateWalletRequest {
+    pub network: Option<String>, // "mainnet" or "testnet"
+}
+
+#[derive(Serialize)]
+pub struct WalletResponse {
+    pub success: bool,
+    pub wif: Option<String>,
+    pub address: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ImportWifRequest {
+    pub wif: String,
+    pub network: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct ImportMnemonicRequest {
+    pub mnemonic: String,
+    pub network: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct BalanceRequest {
+    pub address: String,
+    pub network: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct BalanceResponse {
+    pub success: bool,
+    pub balance: Option<i64>,
+    pub balance_bsv: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SendRequest {
+    pub wif: String,
+    pub to_address: String,
+    pub amount_satoshis: i64,
+    pub network: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct SendResponse {
+    pub success: bool,
+    pub txid: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Generate a new wallet
+pub async fn generate_wallet(
+    State(_state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<GenerateWalletRequest>,
+) -> Json<WalletResponse> {
+    let network = req.network.unwrap_or_else(|| "mainnet".to_string());
+    
+    // Generate keypair (currently only mainnet format)
+    let (wif, address) = BsvService::generate_keypair();
+    
+    // For testnet, we would need to modify the version bytes
+    // For now, we return mainnet format and note the network
+    Json(WalletResponse {
+        success: true,
+        wif: Some(wif),
+        address: Some(address),
+        error: None,
+    })
+}
+
+/// Import wallet from WIF
+pub async fn import_wif(
+    State(_state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<ImportWifRequest>,
+) -> Json<WalletResponse> {
+    match BsvService::wif_to_address(&req.wif) {
+        Ok(address) => Json(WalletResponse {
+            success: true,
+            wif: Some(req.wif),
+            address: Some(address),
+            error: None,
+        }),
+        Err(e) => Json(WalletResponse {
+            success: false,
+            wif: None,
+            address: None,
+            error: Some(format!("Invalid WIF: {}", e)),
+        }),
+    }
+}
+
+/// Get balance for an address
+pub async fn get_balance(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<BalanceRequest>,
+) -> Json<BalanceResponse> {
+    let network = req.network.unwrap_or_else(|| "mainnet".to_string());
+    
+    let state = state.read().await;
+    
+    // Get UTXOs for the address
+    match state.bitails.get_address_unspent(&req.address).await {
+        Ok(utxos) => {
+            let balance: i64 = utxos.iter().map(|u| u.satoshis).sum();
+            let balance_bsv = format!("{:.8}", balance as f64 / 100_000_000.0);
+            
+            Json(BalanceResponse {
+                success: true,
+                balance: Some(balance),
+                balance_bsv: Some(balance_bsv),
+                error: None,
+            })
+        }
+        Err(e) => Json(BalanceResponse {
+            success: false,
+            balance: None,
+            balance_bsv: None,
+            error: Some(format!("Failed to get balance: {}", e)),
+        }),
+    }
+}
+
+/// Send BSV to an address
+pub async fn send_bsv(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<SendRequest>,
+) -> Json<SendResponse> {
+    // Validate WIF and get sender address
+    let sender_address = match BsvService::wif_to_address(&req.wif) {
+        Ok(addr) => addr,
+        Err(e) => {
+            return Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Invalid WIF: {}", e)),
+            });
+        }
+    };
+    
+    let state_guard = state.read().await;
+    
+    // Get UTXOs
+    let utxos = match state_guard.bitails.get_address_unspent(&sender_address).await {
+        Ok(u) => u,
+        Err(e) => {
+            return Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Failed to get UTXOs: {}", e)),
+            });
+        }
+    };
+    
+    if utxos.is_empty() {
+        return Json(SendResponse {
+            success: false,
+            txid: None,
+            error: Some("No UTXOs available".to_string()),
+        });
+    }
+    
+    // Calculate total input
+    let total_input: i64 = utxos.iter().map(|u| u.satoshis).sum();
+    
+    // Get scriptPubKey for sender address
+    let sender_script = match BsvService::create_p2pkh_script(&sender_address) {
+        Ok(s) => s,
+        Err(e) => {
+            return Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Failed to create sender script: {}", e)),
+            });
+        }
+    };
+    
+    // Get scriptPubKey for recipient address
+    let recipient_script = match BsvService::create_p2pkh_script(&req.to_address) {
+        Ok(s) => s,
+        Err(e) => {
+            return Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Invalid recipient address: {}", e)),
+            });
+        }
+    };
+    
+    // Prepare UTXOs for transaction
+    let utxo_inputs: Vec<(String, u32, i64, Vec<u8>)> = utxos
+        .iter()
+        .map(|u| (u.txid.clone(), u.vout, u.satoshis, sender_script.clone()))
+        .collect();
+    
+    // Calculate fee (estimate ~250 bytes for a simple tx)
+    let fee = (250.0 * state_guard.bsv.fee_rate).ceil() as i64;
+    
+    // Check if we have enough funds
+    if total_input < req.amount_satoshis + fee {
+        return Json(SendResponse {
+            success: false,
+            txid: None,
+            error: Some(format!(
+                "Insufficient funds: have {} sats, need {} sats (including {} fee)",
+                total_input,
+                req.amount_satoshis + fee,
+                fee
+            )),
+        });
+    }
+    
+    // Calculate change
+    let change = total_input - req.amount_satoshis - fee;
+    
+    // Create outputs
+    let mut outputs: Vec<(Vec<u8>, i64)> = vec![
+        (recipient_script, req.amount_satoshis),
+    ];
+    
+    // Add change output if significant (> dust limit)
+    if change > 546 {
+        outputs.push((sender_script.clone(), change));
+    }
+    
+    // Create transaction
+    let raw_tx = match state_guard.bsv.create_transaction(&req.wif, &utxo_inputs, &outputs) {
+        Ok(tx) => tx,
+        Err(e) => {
+            return Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Failed to create transaction: {}", e)),
+            });
+        }
+    };
+    
+    // Broadcast transaction
+    match state_guard.bitails.broadcast_transaction(&raw_tx).await {
+        Ok(txid) => Json(SendResponse {
+            success: true,
+            txid: Some(txid),
+            error: None,
+        }),
+        Err(e) => Json(SendResponse {
+            success: false,
+            txid: None,
+            error: Some(format!("Failed to broadcast: {}", e)),
+        }),
+    }
+}
