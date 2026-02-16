@@ -114,28 +114,76 @@ pub async fn get_balance(
 ) -> Json<BalanceResponse> {
     let network = req.network.unwrap_or_else(|| "mainnet".to_string());
     
-    let state = state.read().await;
-    
-    // Get UTXOs for the address
-    match state.bitails.get_address_unspent(&req.address).await {
-        Ok(utxos) => {
-            let balance: i64 = utxos.iter().map(|u| u.satoshis).sum();
-            let balance_bsv = format!("{:.8}", balance as f64 / 100_000_000.0);
-            
-            Json(BalanceResponse {
-                success: true,
-                balance: Some(balance),
-                balance_bsv: Some(balance_bsv),
-                error: None,
-            })
+    // Use WhatsOnChain API for testnet, Bitails for mainnet
+    if network == "testnet" {
+        match get_testnet_balance(&req.address).await {
+            Ok((balance, balance_bsv)) => {
+                Json(BalanceResponse {
+                    success: true,
+                    balance: Some(balance),
+                    balance_bsv: Some(balance_bsv),
+                    error: None,
+                })
+            }
+            Err(e) => Json(BalanceResponse {
+                success: false,
+                balance: None,
+                balance_bsv: None,
+                error: Some(format!("Failed to get balance: {}", e)),
+            }),
         }
-        Err(e) => Json(BalanceResponse {
-            success: false,
-            balance: None,
-            balance_bsv: None,
-            error: Some(format!("Failed to get balance: {}", e)),
-        }),
+    } else {
+        let state = state.read().await;
+        
+        // Get UTXOs for the address
+        match state.bitails.get_address_unspent(&req.address).await {
+            Ok(utxos) => {
+                let balance: i64 = utxos.iter().map(|u| u.satoshis).sum();
+                let balance_bsv = format!("{:.8}", balance as f64 / 100_000_000.0);
+                
+                Json(BalanceResponse {
+                    success: true,
+                    balance: Some(balance),
+                    balance_bsv: Some(balance_bsv),
+                    error: None,
+                })
+            }
+            Err(e) => Json(BalanceResponse {
+                success: false,
+                balance: None,
+                balance_bsv: None,
+                error: Some(format!("Failed to get balance: {}", e)),
+            }),
+        }
     }
+}
+
+/// Get testnet balance using WhatsOnChain API
+async fn get_testnet_balance(address: &str) -> Result<(i64, String), String> {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.whatsonchain.com/v1/bsv/test/address/{}/balance", address);
+    
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
+    }
+    
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    let confirmed = json.get("confirmed").and_then(|v| v.as_i64()).unwrap_or(0);
+    let unconfirmed = json.get("unconfirmed").and_then(|v| v.as_i64()).unwrap_or(0);
+    let balance = confirmed + unconfirmed;
+    let balance_bsv = format!("{:.8}", balance as f64 / 100_000_000.0);
+    
+    Ok((balance, balance_bsv))
 }
 
 /// Send BSV to an address
