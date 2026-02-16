@@ -76,8 +76,8 @@ pub async fn prepare_upload(
 
     let file_size = file_data.len() as i64;
 
-    // Generate new keypair for payment
-    let (wif, address) = BsvService::generate_keypair();
+    // Generate new keypair for payment (mainnet for production)
+    let (wif, address) = BsvService::generate_keypair("mainnet");
 
     // Calculate required payment
     let required_satoshis = {

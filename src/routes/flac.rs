@@ -119,8 +119,8 @@ pub async fn prepare_flac_upload(
         );
     }
 
-    // Generate payment keypair
-    let (wif, address) = BsvService::generate_keypair();
+    // Generate payment keypair (mainnet for production)
+    let (wif, address) = BsvService::generate_keypair("mainnet");
 
     // Calculate required satoshis
     // For large files, we need to account for UTXO splitting and multiple chunk transactions

@@ -71,11 +71,11 @@ pub async fn generate_wallet(
 ) -> Json<WalletResponse> {
     let network = req.network.unwrap_or_else(|| "mainnet".to_string());
     
-    // Generate keypair (currently only mainnet format)
-    let (wif, address) = BsvService::generate_keypair();
+    // Generate keypair with correct network format
+    // Mainnet: address starts with "1", WIF starts with "5", "K", or "L"
+    // Testnet: address starts with "m" or "n", WIF starts with "c"
+    let (wif, address) = BsvService::generate_keypair(&network);
     
-    // For testnet, we would need to modify the version bytes
-    // For now, we return mainnet format and note the network
     Json(WalletResponse {
         success: true,
         wif: Some(wif),
@@ -89,7 +89,9 @@ pub async fn import_wif(
     State(_state): State<Arc<RwLock<AppState>>>,
     Json(req): Json<ImportWifRequest>,
 ) -> Json<WalletResponse> {
-    match BsvService::wif_to_address(&req.wif) {
+    let network = req.network.unwrap_or_else(|| "mainnet".to_string());
+    
+    match BsvService::wif_to_address(&req.wif, &network) {
         Ok(address) => Json(WalletResponse {
             success: true,
             wif: Some(req.wif),
@@ -141,8 +143,10 @@ pub async fn send_bsv(
     State(state): State<Arc<RwLock<AppState>>>,
     Json(req): Json<SendRequest>,
 ) -> Json<SendResponse> {
+    let network = req.network.unwrap_or_else(|| "mainnet".to_string());
+    
     // Validate WIF and get sender address
-    let sender_address = match BsvService::wif_to_address(&req.wif) {
+    let sender_address = match BsvService::wif_to_address(&req.wif, &network) {
         Ok(addr) => addr,
         Err(e) => {
             return Json(SendResponse {

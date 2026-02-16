@@ -18,12 +18,13 @@ impl BsvService {
     }
 
     /// Generate a new keypair and return (WIF private key, address)
-    pub fn generate_keypair() -> (String, String) {
+    /// network: "mainnet" or "testnet"
+    pub fn generate_keypair(network: &str) -> (String, String) {
         let secp = Secp256k1::new();
         let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
 
-        let wif = Self::secret_key_to_wif(&secret_key);
-        let address = Self::public_key_to_address(&public_key);
+        let wif = Self::secret_key_to_wif(&secret_key, network);
+        let address = Self::public_key_to_address(&public_key, network);
 
         (wif, address)
     }
@@ -54,8 +55,11 @@ impl BsvService {
     }
 
     /// Convert SecretKey to WIF (compressed)
-    fn secret_key_to_wif(secret_key: &SecretKey) -> String {
-        let mut data = vec![0x80]; // Mainnet version
+    /// network: "mainnet" or "testnet"
+    fn secret_key_to_wif(secret_key: &SecretKey, network: &str) -> String {
+        // Mainnet: 0x80, Testnet: 0xef
+        let version_byte = if network == "testnet" { 0xef } else { 0x80 };
+        let mut data = vec![version_byte];
         data.extend_from_slice(&secret_key[..]);
         data.push(0x01); // Compressed flag
 
@@ -68,7 +72,8 @@ impl BsvService {
     }
 
     /// Convert public key to BSV address
-    fn public_key_to_address(public_key: &PublicKey) -> String {
+    /// network: "mainnet" or "testnet"
+    fn public_key_to_address(public_key: &PublicKey, network: &str) -> String {
         let serialized = public_key.serialize(); // Compressed
 
         // SHA256
@@ -77,8 +82,10 @@ impl BsvService {
         // RIPEMD160
         let ripemd_hash = Ripemd160::digest(&sha256_hash);
 
-        // Add version byte (0x00 for mainnet)
-        let mut address_bytes = vec![0x00];
+        // Add version byte (0x00 for mainnet, 0x6f for testnet)
+        // Testnet addresses start with 'm' or 'n'
+        let version_byte = if network == "testnet" { 0x6f } else { 0x00 };
+        let mut address_bytes = vec![version_byte];
         address_bytes.extend_from_slice(&ripemd_hash);
 
         // Checksum
@@ -90,11 +97,12 @@ impl BsvService {
     }
 
     /// Get address from WIF
-    pub fn wif_to_address(wif: &str) -> Result<String, String> {
+    /// network: "mainnet" or "testnet"
+    pub fn wif_to_address(wif: &str, network: &str) -> Result<String, String> {
         let secret_key = Self::wif_to_secret_key(wif)?;
         let secp = Secp256k1::new();
         let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        Ok(Self::public_key_to_address(&public_key))
+        Ok(Self::public_key_to_address(&public_key, network))
     }
 
     /// Calculate required satoshis for uploading data
