@@ -101,6 +101,91 @@
             font-size: 1.1rem;
         }
 
+        /* Metadata form styles */
+        .metadata-section {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .metadata-section.visible {
+            display: block;
+        }
+
+        .metadata-section h3 {
+            margin-bottom: 15px;
+            color: #00d4aa;
+            font-size: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+        }
+
+        .form-group input[type="text"],
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            background: #0d0d1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.95rem;
+            box-sizing: border-box;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .cover-upload-zone {
+            border: 2px dashed #333;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .cover-upload-zone:hover {
+            border-color: #00d4aa;
+            background: rgba(0, 212, 170, 0.05);
+        }
+
+        .cover-upload-zone.has-cover {
+            border-color: #00d4aa;
+            border-style: solid;
+        }
+
+        .cover-preview {
+            max-width: 150px;
+            max-height: 150px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .cover-preview.visible {
+            display: block;
+            margin: 10px auto 0;
+        }
+
         .upload-btn {
             width: 100%;
             padding: 16px;
@@ -276,6 +361,26 @@
                 </div>
             </div>
 
+            <div class="metadata-section" id="metadataSection">
+                <h3>Track Info (Optional)</h3>
+                <div class="form-group">
+                    <label for="trackTitle">Title</label>
+                    <input type="text" id="trackTitle" placeholder="Enter track title">
+                </div>
+                <div class="form-group">
+                    <label for="coverInput">Cover Art</label>
+                    <div class="cover-upload-zone" id="coverZone">
+                        <span>Click to select image (JPG/PNG)</span>
+                        <input type="file" id="coverInput" accept="image/jpeg,image/png" hidden>
+                        <img class="cover-preview" id="coverPreview" src="" alt="Cover preview">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="lyricsInput">Lyrics</label>
+                    <textarea id="lyricsInput" placeholder="Enter lyrics (optional)"></textarea>
+                </div>
+            </div>
+
             <button class="upload-btn" id="uploadBtn">Prepare Upload</button>
         </div>
 
@@ -306,12 +411,42 @@
         const uploadBtn = document.getElementById('uploadBtn');
         const uploadSection = document.getElementById('uploadSection');
         const paymentSection = document.getElementById('paymentSection');
+        const metadataSection = document.getElementById('metadataSection');
+        const coverZone = document.getElementById('coverZone');
+        const coverInput = document.getElementById('coverInput');
+        const coverPreview = document.getElementById('coverPreview');
 
         let selectedFile = null;
+        let selectedCover = null;
         let currentJobId = null;
 
         // File selection
         dropZone.addEventListener('click', () => fileInput.click());
+
+        // Cover image selection
+        coverZone.addEventListener('click', () => coverInput.click());
+
+        coverInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleCoverFile(e.target.files[0]);
+            }
+        });
+
+        function handleCoverFile(file) {
+            if (!file.type.match(/^image\/(jpeg|png)$/)) {
+                alert('Please select a JPG or PNG image');
+                return;
+            }
+            selectedCover = file;
+            coverZone.classList.add('has-cover');
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                coverPreview.src = e.target.result;
+                coverPreview.classList.add('visible');
+            };
+            reader.readAsDataURL(file);
+        }
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -355,6 +490,7 @@
             document.getElementById('estCost').textContent = `~${estBsv} BSV`;
 
             fileInfo.classList.add('visible');
+            metadataSection.classList.add('visible');
             uploadBtn.classList.add('visible');
         }
 
@@ -373,6 +509,20 @@
 
             const formData = new FormData();
             formData.append('file', selectedFile);
+            
+            // Add metadata
+            const trackTitle = document.getElementById('trackTitle').value.trim();
+            const lyrics = document.getElementById('lyricsInput').value.trim();
+            
+            if (trackTitle) {
+                formData.append('title', trackTitle);
+            }
+            if (selectedCover) {
+                formData.append('cover', selectedCover);
+            }
+            if (lyrics) {
+                formData.append('lyrics', lyrics);
+            }
 
             try {
                 const response = await fetch('/api/flac/upload', {

@@ -35,10 +35,18 @@ impl Database {
                 message TEXT NOT NULL,
                 progress REAL NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                track_title TEXT,
+                cover_txid TEXT,
+                lyrics TEXT
             )",
             [],
         )?;
+
+        // Add new columns if they don't exist (for migration)
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN track_title TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN cover_txid TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN lyrics TEXT", []);
 
         Ok(Database {
             conn: Mutex::new(conn),
@@ -52,8 +60,8 @@ impl Database {
                 id, job_type, status, filename, file_size, file_data,
                 payment_address, payment_wif, required_satoshis,
                 manifest_txid, download_link, message, progress,
-                created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                created_at, updated_at, track_title, cover_txid, lyrics
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 job.id,
                 job.job_type.as_str(),
@@ -70,6 +78,9 @@ impl Database {
                 job.progress,
                 job.created_at.to_rfc3339(),
                 job.updated_at.to_rfc3339(),
+                job.track_title,
+                job.cover_txid,
+                job.lyrics,
             ],
         )?;
         Ok(())
@@ -81,7 +92,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at
+                    created_at, updated_at, track_title, cover_txid, lyrics
              FROM jobs WHERE id = ?1",
         )?;
 
@@ -100,7 +111,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at
+                    created_at, updated_at, track_title, cover_txid, lyrics
              FROM jobs WHERE status = 'processing'",
         )?;
 
@@ -120,7 +131,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at
+                    created_at, updated_at, track_title, cover_txid, lyrics
              FROM jobs WHERE status = 'pending_payment'",
         )?;
 
@@ -255,6 +266,24 @@ impl Database {
             updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
+            track_title: row.get(15).ok(),
+            cover_txid: row.get(16).ok(),
+            lyrics: row.get(17).ok(),
         })
+    }
+
+    pub fn update_job_metadata(
+        &self,
+        id: &str,
+        track_title: Option<&str>,
+        cover_txid: Option<&str>,
+        lyrics: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET track_title = ?1, cover_txid = ?2, lyrics = ?3, updated_at = ?4 WHERE id = ?5",
+            params![track_title, cover_txid, lyrics, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
     }
 }

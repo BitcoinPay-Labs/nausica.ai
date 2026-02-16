@@ -46,15 +46,44 @@ pub async fn prepare_flac_upload(
 ) -> impl IntoResponse {
     let mut filename: Option<String> = None;
     let mut file_data: Option<Vec<u8>> = None;
+    let mut track_title: Option<String> = None;
+    let mut cover_data: Option<Vec<u8>> = None;
+    let mut cover_filename: Option<String> = None;
+    let mut lyrics: Option<String> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
 
-        if name == "file" {
-            filename = field.file_name().map(|s| s.to_string());
-            if let Ok(data) = field.bytes().await {
-                file_data = Some(data.to_vec());
+        match name.as_str() {
+            "file" => {
+                filename = field.file_name().map(|s| s.to_string());
+                if let Ok(data) = field.bytes().await {
+                    file_data = Some(data.to_vec());
+                }
             }
+            "title" => {
+                if let Ok(data) = field.text().await {
+                    if !data.trim().is_empty() {
+                        track_title = Some(data.trim().to_string());
+                    }
+                }
+            }
+            "cover" => {
+                cover_filename = field.file_name().map(|s| s.to_string());
+                if let Ok(data) = field.bytes().await {
+                    if !data.is_empty() {
+                        cover_data = Some(data.to_vec());
+                    }
+                }
+            }
+            "lyrics" => {
+                if let Ok(data) = field.text().await {
+                    if !data.trim().is_empty() {
+                        lyrics = Some(data.trim().to_string());
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -115,6 +144,11 @@ pub async fn prepare_flac_upload(
     let job_id = uuid::Uuid::new_v4().to_string().replace("-", "");
     let now = chrono::Utc::now();
 
+    // Store cover data temporarily for later upload (will be uploaded when payment is confirmed)
+    // For now, we store cover_data in a separate field or handle it during processing
+    let _ = cover_data; // Will be used in future for BSV upload
+    let _ = cover_filename; // Will be used in future for BSV upload
+
     let job = Job {
         id: job_id.clone(),
         job_type: JobType::FlacUpload,
@@ -131,6 +165,9 @@ pub async fn prepare_flac_upload(
         message: "Waiting for payment...".to_string(),
         created_at: now,
         updated_at: now,
+        track_title,
+        cover_txid: None, // Will be set after cover image is uploaded to BSV
+        lyrics,
     };
 
     {
@@ -211,6 +248,9 @@ pub async fn start_flac_download(
         message: "Starting FLAC download...".to_string(),
         created_at: now,
         updated_at: now,
+        track_title: None,
+        cover_txid: None,
+        lyrics: None,
     };
 
     {
@@ -252,6 +292,9 @@ pub struct FlacStatusResponse {
     pub txid: Option<String>,
     pub download_link: Option<String>,
     pub filename: Option<String>,
+    pub track_title: Option<String>,
+    pub cover_txid: Option<String>,
+    pub lyrics: Option<String>,
 }
 
 /// Get FLAC job status
@@ -277,6 +320,9 @@ pub async fn get_flac_status(
                 txid: job.manifest_txid,
                 download_link: job.download_link,
                 filename: job.filename,
+                track_title: job.track_title,
+                cover_txid: job.cover_txid,
+                lyrics: job.lyrics,
             })
         }
         Ok(None) => Json(FlacStatusResponse {
@@ -286,6 +332,9 @@ pub async fn get_flac_status(
             txid: None,
             download_link: None,
             filename: None,
+            track_title: None,
+            cover_txid: None,
+            lyrics: None,
         }),
         Err(e) => Json(FlacStatusResponse {
             status: "error".to_string(),
@@ -294,6 +343,9 @@ pub async fn get_flac_status(
             txid: None,
             download_link: None,
             filename: None,
+            track_title: None,
+            cover_txid: None,
+            lyrics: None,
         }),
     }
 }

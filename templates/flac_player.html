@@ -352,6 +352,68 @@
             border-color: #00d4aa;
         }
 
+        /* Cover art image */
+        .album-art img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 20px;
+        }
+
+        /* Lyrics section */
+        .lyrics-section {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .lyrics-section.visible {
+            display: block;
+        }
+
+        .lyrics-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .lyrics-header h3 {
+            color: #00d4aa;
+            font-size: 1rem;
+            margin: 0;
+        }
+
+        .lyrics-toggle {
+            background: none;
+            border: 1px solid #444;
+            color: #888;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .lyrics-toggle:hover {
+            border-color: #00d4aa;
+            color: #00d4aa;
+        }
+
+        .lyrics-content {
+            color: #ccc;
+            white-space: pre-wrap;
+            font-size: 0.95rem;
+            line-height: 1.8;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .lyrics-content.expanded {
+            max-height: none;
+        }
+
         /* Error state */
         .error-message {
             background: rgba(255, 100, 100, 0.1);
@@ -494,6 +556,15 @@
                 </div>
             </div>
 
+            <!-- Lyrics section -->
+            <div class="lyrics-section" id="lyricsSection">
+                <div class="lyrics-header">
+                    <h3>Lyrics</h3>
+                    <button class="lyrics-toggle" id="lyricsToggle">Expand</button>
+                </div>
+                <div class="lyrics-content" id="lyricsContent"></div>
+            </div>
+
             <!-- Download section -->
             <div class="download-section">
                 <a class="download-btn" id="downloadBtn" href="#" download>
@@ -593,8 +664,29 @@
         function showPlayer(data) {
             playerSection.classList.add('visible');
             
-            // Set track info
-            document.getElementById('trackTitle').textContent = data.filename || 'Unknown Track';
+            // Set track title (prefer track_title over filename)
+            const displayTitle = data.track_title || data.filename || 'Unknown Track';
+            document.getElementById('trackTitle').textContent = displayTitle;
+            
+            // Set cover art if available
+            const albumArt = document.getElementById('albumArt');
+            if (data.cover_txid) {
+                // Load cover image from BSV (future implementation)
+                // For now, show placeholder
+                albumArt.innerHTML = '🎵';
+            } else {
+                albumArt.innerHTML = '🎵';
+            }
+            
+            // Set lyrics if available
+            const lyricsSection = document.getElementById('lyricsSection');
+            const lyricsContent = document.getElementById('lyricsContent');
+            if (data.lyrics) {
+                lyricsContent.textContent = data.lyrics;
+                lyricsSection.classList.add('visible');
+            } else {
+                lyricsSection.classList.remove('visible');
+            }
             
             // Set audio source
             audioPlayer.src = data.download_link;
@@ -603,6 +695,13 @@
             document.getElementById('downloadBtn').href = data.download_link;
             document.getElementById('downloadBtn').download = data.filename || 'audio.flac';
         }
+
+        // Lyrics toggle functionality
+        document.getElementById('lyricsToggle').addEventListener('click', function() {
+            const lyricsContent = document.getElementById('lyricsContent');
+            const isExpanded = lyricsContent.classList.toggle('expanded');
+            this.textContent = isExpanded ? 'Collapse' : 'Expand';
+        });
 
         // Audio player controls
         const playBtn = document.getElementById('playBtn');
