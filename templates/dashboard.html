@@ -1,30 +1,62 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Upfile Protocol - Dashboard</title>
+    <title>ナウシカ.ai - Dashboard</title>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .audio-player-mini {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            padding: 15px 20px;
+            display: none;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        .audio-player-mini.visible { display: flex; }
+        .audio-player-mini .track-info { flex: 1; min-width: 0; }
+        .audio-player-mini .track-name { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .audio-player-mini .play-btn {
+            width: 44px; height: 44px;
+            background: linear-gradient(135deg, #00d4aa, #00a080);
+            border: none; border-radius: 50%;
+            color: #fff; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .audio-player-mini .close-btn {
+            background: none; border: none; color: #888; cursor: pointer; padding: 8px;
+        }
+        .btn-play-flac {
+            background: linear-gradient(135deg, #00d4aa, #00a080) !important;
+            color: #fff !important;
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar">
         <div class="nav-brand">
-            <i data-lucide="hard-drive"></i>
-            <span>Upfile Protocol</span>
+            <i data-lucide="music"></i>
+            <span>NAUSICA</span>
         </div>
         <div class="nav-links">
             <a href="/" class="nav-link active">
                 <i data-lucide="layout-dashboard"></i>
                 Dashboard
             </a>
-            <a href="/upload" class="nav-link">
+            <a href="/flac/upload" class="nav-link">
                 <i data-lucide="upload"></i>
                 Upload
             </a>
-            <a href="/download" class="nav-link">
-                <i data-lucide="download"></i>
-                Download
+            <a href="/flac/player" class="nav-link">
+                <i data-lucide="headphones"></i>
+                Player
             </a>
         </div>
     </nav>
@@ -32,7 +64,6 @@
     <main class="container">
         <div class="page-header">
             <h1>Dashboard</h1>
-            <p>View your upload and download history</p>
         </div>
 
         <div class="card">
@@ -112,6 +143,11 @@
                                     <td>${new Date(job.created_at).toLocaleString()}</td>
                                     <td>
                                         <div class="action-buttons">
+                                            ${(job.job_type === 'flac_upload' || job.job_type === 'upload') && job.manifest_txid && job.status === 'complete' ? `
+                                                <button class="btn btn-sm btn-play-flac" onclick="playFlac('${job.manifest_txid}', '${job.filename || 'Audio'}')">
+                                                    <i data-lucide="play"></i>
+                                                </button>
+                                            ` : ''}
                                             <a href="/status/${job.id}" class="btn btn-sm btn-secondary">
                                                 <i data-lucide="eye"></i>
                                             </a>
@@ -129,6 +165,51 @@
                             `).join('')}
                         </tbody>
                     </table>
+                    <div class="job-cards">
+                        ${jobs.map(job => `
+                            <div class="job-card">
+                                <div class="job-card-header">
+                                    <span class="job-type ${job.job_type}">
+                                        <i data-lucide="${job.job_type === 'upload' ? 'upload' : 'download'}"></i>
+                                        ${job.job_type}
+                                    </span>
+                                    <span class="status-badge ${job.status}">
+                                        ${job.status.replace('_', ' ')}
+                                    </span>
+                                </div>
+                                <div class="job-card-row">
+                                    <span class="job-card-label">File</span>
+                                    <span class="job-card-value">${job.filename || '-'}</span>
+                                </div>
+                                <div class="job-card-row">
+                                    <span class="job-card-label">TXID</span>
+                                    <span class="job-card-value txid">${job.manifest_txid ? job.manifest_txid.substring(0, 12) + '...' : '-'}</span>
+                                </div>
+                                <div class="job-card-row">
+                                    <span class="job-card-label">Date</span>
+                                    <span class="job-card-value">${new Date(job.created_at).toLocaleDateString()}</span>
+                                </div>
+                                <div class="job-card-actions">
+                                    ${(job.job_type === 'flac_upload' || job.job_type === 'upload') && job.manifest_txid && job.status === 'complete' ? `
+                                        <button class="btn btn-sm btn-play-flac" onclick="playFlac('${job.manifest_txid}', '${job.filename || 'Audio'}')">
+                                            <i data-lucide="play"></i>
+                                        </button>
+                                    ` : ''}
+                                    <a href="/status/${job.id}" class="btn btn-sm btn-secondary">
+                                        <i data-lucide="eye"></i>
+                                    </a>
+                                    ${job.manifest_txid ? `
+                                        <button class="btn btn-sm btn-secondary" onclick="copyTxid('${job.manifest_txid}')">
+                                            <i data-lucide="copy"></i>
+                                        </button>
+                                        <a href="https://whatsonchain.com/tx/${job.manifest_txid}" target="_blank" class="btn btn-sm btn-secondary">
+                                            <i data-lucide="external-link"></i>
+                                        </a>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
                 `;
                 lucide.createIcons();
             } catch (error) {
@@ -145,6 +226,16 @@
         function copyTxid(txid) {
             navigator.clipboard.writeText(txid);
             alert('TXID copied to clipboard!');
+        }
+
+        // FLAC Player functionality
+        let audioPlayer = null;
+        let currentTxid = null;
+        let isPlaying = false;
+
+        function playFlac(txid, filename) {
+            // Redirect to player page with TXID
+            window.location.href = `/flac/player?txid=${txid}`;
         }
 
         document.getElementById('refresh-btn').addEventListener('click', loadJobs);

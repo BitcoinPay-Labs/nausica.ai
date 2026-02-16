@@ -206,6 +206,22 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_job_complete_with_filename(
+        &self,
+        id: &str,
+        manifest_txid: &str,
+        download_link: Option<&str>,
+        filename: &str,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET status = 'complete', manifest_txid = ?1, download_link = ?2,
+             filename = ?3, message = 'Complete', progress = 100.0, updated_at = ?4 WHERE id = ?5",
+            params![manifest_txid, download_link, filename, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
     pub fn update_job_error(&self, id: &str, message: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
