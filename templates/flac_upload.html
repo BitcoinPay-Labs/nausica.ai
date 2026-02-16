@@ -383,8 +383,8 @@
             <div class="upload-zone" id="dropZone">
                 <div class="upload-icon">📁</div>
                 <div class="upload-text">Tap to select or drag & drop</div>
-                <div class="upload-hint">FLAC or WAV files • Max 10MB recommended</div>
-                <input type="file" id="fileInput" accept=".flac,.wav,audio/flac,audio/wav,audio/wave,audio/x-wav" hidden>
+                                <div class="upload-hint">FLAC, WAV, or MP3 files • Max 10MB recommended</div>
+                                <input type="file" id="fileInput" accept=".flac,.wav,.mp3,audio/flac,audio/wav,audio/wave,audio/x-wav,audio/mpeg,audio/mp3" hidden>
             </div>
 
             <div class="file-info" id="fileInfo">
@@ -416,11 +416,15 @@
                         <img class="cover-preview" id="coverPreview" src="" alt="Cover preview">
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="lyricsInput">Lyrics</label>
-                    <textarea id="lyricsInput" placeholder="Enter lyrics (optional)"></textarea>
-                </div>
-            </div>
+                            <div class="form-group">
+                                <label for="lyricsInput">Lyrics</label>
+                                <textarea id="lyricsInput" placeholder="Enter lyrics (optional)"></textarea>
+                                <div class="lrc-upload-zone" id="lrcZone" style="margin-top: 10px; border: 1px dashed #333; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; font-size: 0.85rem; color: #888;">
+                                    <span id="lrcLabel">Or upload .lrc file</span>
+                                    <input type="file" id="lrcInput" accept=".lrc" hidden>
+                                </div>
+                            </div>
+                        </div>
 
             <button class="upload-btn" id="uploadBtn">Prepare Upload</button>
         </div>
@@ -457,10 +461,14 @@
         const coverInput = document.getElementById('coverInput');
         const coverPreview = document.getElementById('coverPreview');
 
-        let selectedFile = null;
-        let selectedCover = null;
-        let currentJobId = null;
-        let selectedNetwork = 'mainnet';
+                let selectedFile = null;
+                let selectedCover = null;
+                let selectedLrc = null;
+                let currentJobId = null;
+                let selectedNetwork = 'mainnet';
+        
+                const lrcZone = document.getElementById('lrcZone');
+                const lrcInput = document.getElementById('lrcInput');
 
         // Network selection
         function selectNetwork(network) {
@@ -477,14 +485,44 @@
         // File selection
         dropZone.addEventListener('click', () => fileInput.click());
 
-        // Cover image selection
-        coverZone.addEventListener('click', () => coverInput.click());
+                // Cover image selection
+                coverZone.addEventListener('click', () => coverInput.click());
 
-        coverInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                handleCoverFile(e.target.files[0]);
-            }
-        });
+                coverInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleCoverFile(e.target.files[0]);
+                    }
+                });
+
+                // LRC file selection
+                lrcZone.addEventListener('click', () => lrcInput.click());
+
+                lrcInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleLrcFile(e.target.files[0]);
+                    }
+                });
+
+                function handleLrcFile(file) {
+                    if (!file.name.toLowerCase().endsWith('.lrc')) {
+                        alert('Please select a .lrc file');
+                        return;
+                    }
+                    selectedLrc = file;
+                    document.getElementById('lrcLabel').textContent = file.name;
+                    lrcZone.style.borderColor = '#00d4aa';
+                    lrcZone.style.color = '#00d4aa';
+            
+                    // Read LRC file and populate lyrics textarea
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        // Parse LRC format - remove timestamps for display
+                        const lrcContent = e.target.result;
+                        const plainLyrics = lrcContent.replace(/\[\d{2}:\d{2}\.\d{2}\]/g, '').trim();
+                        document.getElementById('lyricsInput').value = plainLyrics;
+                    };
+                    reader.readAsText(file);
+                }
 
         function handleCoverFile(file) {
             if (!file.type.match(/^image\/(jpeg|png)$/)) {
@@ -526,12 +564,12 @@
             }
         });
 
-        function handleFile(file) {
-            const lowerName = file.name.toLowerCase();
-            if (!lowerName.endsWith('.flac') && !lowerName.endsWith('.wav')) {
-                alert('Please select a FLAC or WAV file');
-                return;
-            }
+                function handleFile(file) {
+                    const lowerName = file.name.toLowerCase();
+                    if (!lowerName.endsWith('.flac') && !lowerName.endsWith('.wav') && !lowerName.endsWith('.mp3')) {
+                        alert('Please select a FLAC, WAV, or MP3 file');
+                        return;
+                    }
 
             selectedFile = file;
             dropZone.classList.add('has-file');
