@@ -50,6 +50,7 @@ pub async fn prepare_flac_upload(
     let mut cover_data: Option<Vec<u8>> = None;
     let mut cover_filename: Option<String> = None;
     let mut lyrics: Option<String> = None;
+    let mut network: String = "mainnet".to_string();
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -80,6 +81,14 @@ pub async fn prepare_flac_upload(
                 if let Ok(data) = field.text().await {
                     if !data.trim().is_empty() {
                         lyrics = Some(data.trim().to_string());
+                    }
+                }
+            }
+            "network" => {
+                if let Ok(data) = field.text().await {
+                    let net = data.trim().to_lowercase();
+                    if net == "testnet" {
+                        network = "testnet".to_string();
                     }
                 }
             }
@@ -120,8 +129,8 @@ pub async fn prepare_flac_upload(
         );
     }
 
-    // Generate payment keypair (mainnet for production)
-    let (wif, address) = BsvService::generate_keypair("mainnet");
+    // Generate payment keypair based on selected network
+    let (wif, address) = BsvService::generate_keypair(&network);
 
     // Calculate required satoshis
     // For large files, we need to account for UTXO splitting and multiple chunk transactions

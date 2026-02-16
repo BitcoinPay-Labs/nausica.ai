@@ -101,6 +101,42 @@
             font-size: 1.1rem;
         }
 
+        /* Network selector styles */
+        .network-selector {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .network-btn {
+            padding: 10px 20px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.9rem;
+        }
+
+        .network-btn:hover {
+            border-color: #555;
+            color: #ccc;
+        }
+
+        .network-btn.active {
+            border-color: #00d4aa;
+            color: #00d4aa;
+            background: rgba(0, 212, 170, 0.1);
+        }
+
+        .network-btn.testnet.active {
+            border-color: #f5a623;
+            color: #f5a623;
+            background: rgba(245, 166, 35, 0.1);
+        }
+
         /* Metadata form styles */
         .metadata-section {
             background: #1a1a2e;
@@ -338,6 +374,11 @@
             <p>For best quality, use FLAC.</p>
         </div>
 
+        <div class="network-selector">
+            <button class="network-btn active" id="mainnetBtn" onclick="selectNetwork('mainnet')">Mainnet</button>
+            <button class="network-btn testnet" id="testnetBtn" onclick="selectNetwork('testnet')">Testnet</button>
+        </div>
+
         <div id="uploadSection">
             <div class="upload-zone" id="dropZone">
                 <div class="upload-icon">📁</div>
@@ -419,6 +460,19 @@
         let selectedFile = null;
         let selectedCover = null;
         let currentJobId = null;
+        let selectedNetwork = 'mainnet';
+
+        // Network selection
+        function selectNetwork(network) {
+            selectedNetwork = network;
+            document.getElementById('mainnetBtn').classList.remove('active');
+            document.getElementById('testnetBtn').classList.remove('active');
+            if (network === 'mainnet') {
+                document.getElementById('mainnetBtn').classList.add('active');
+            } else {
+                document.getElementById('testnetBtn').classList.add('active');
+            }
+        }
 
         // File selection
         dropZone.addEventListener('click', () => fileInput.click());
@@ -510,6 +564,7 @@
 
             const formData = new FormData();
             formData.append('file', selectedFile);
+            formData.append('network', selectedNetwork);
             
             // Add metadata
             const trackTitle = document.getElementById('trackTitle').value.trim();
