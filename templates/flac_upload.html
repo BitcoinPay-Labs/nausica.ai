@@ -342,8 +342,8 @@
             <div class="upload-zone" id="dropZone">
                 <div class="upload-icon">📁</div>
                 <div class="upload-text">Tap to select or drag & drop</div>
-                <div class="upload-hint">FLAC files only • Max 10MB recommended</div>
-                <input type="file" id="fileInput" accept=".flac,audio/flac" hidden>
+                <div class="upload-hint">FLAC or WAV files • Max 10MB recommended</div>
+                <input type="file" id="fileInput" accept=".flac,.wav,audio/flac,audio/wav,audio/wave,audio/x-wav" hidden>
             </div>
 
             <div class="file-info" id="fileInfo">
@@ -473,8 +473,9 @@
         });
 
         function handleFile(file) {
-            if (!file.name.toLowerCase().endsWith('.flac')) {
-                alert('Please select a FLAC file');
+            const lowerName = file.name.toLowerCase();
+            if (!lowerName.endsWith('.flac') && !lowerName.endsWith('.wav')) {
+                alert('Please select a FLAC or WAV file');
                 return;
             }
 

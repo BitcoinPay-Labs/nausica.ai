@@ -105,8 +105,9 @@ pub async fn prepare_flac_upload(
 
     let filename = filename.unwrap_or_else(|| "audio.flac".to_string());
 
-    // Validate FLAC file
-    if !filename.to_lowercase().ends_with(".flac") {
+    // Validate audio file (FLAC or WAV)
+    let lower_filename = filename.to_lowercase();
+    if !lower_filename.ends_with(".flac") && !lower_filename.ends_with(".wav") {
         return (
             StatusCode::BAD_REQUEST,
             Json(FlacUploadResponse {
@@ -114,7 +115,7 @@ pub async fn prepare_flac_upload(
                 job_id: None,
                 payment_address: None,
                 required_satoshis: None,
-                error: Some("Only FLAC files are supported".to_string()),
+                error: Some("Only FLAC and WAV files are supported".to_string()),
             }),
         );
     }
