@@ -282,7 +282,8 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
             process_download(state, job_id, job.manifest_txid).await;
         }
         JobType::FlacDownload => {
-            process_flac_download(state, job_id, job.manifest_txid).await;
+            let network = job.network.unwrap_or_else(|| "mainnet".to_string());
+            process_flac_download(state, job_id, job.manifest_txid, network).await;
         }
     }
 }
@@ -927,8 +928,26 @@ async fn process_download(state: Arc<RwLock<AppState>>, job_id: String, txid: Op
     tracing::info!("Download complete for job {}: {}", job_id, filename);
 }
 
+/// Fetch transaction data from appropriate API based on network
+async fn fetch_tx_raw(state: &Arc<RwLock<AppState>>, txid: &str, network: &str) -> Result<String, String> {
+    if network == "testnet" {
+        // Use WhatsOnChain Testnet API
+        let url = format!("https://api.whatsonchain.com/v1/bsv/test/tx/{}/hex", txid);
+        let client = reqwest::Client::new();
+        let response = client.get(&url).send().await.map_err(|e| format!("Request failed: {}", e))?;
+        if !response.status().is_success() {
+            return Err(format!("API error: {}", response.status()));
+        }
+        response.text().await.map_err(|e| format!("Parse error: {}", e))
+    } else {
+        // Use Bitails Mainnet API
+        let state = state.read().await;
+        state.bitails.download_tx_raw(txid).await
+    }
+}
+
 /// Process FLAC download
-async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txid: Option<String>) {
+async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txid: Option<String>, network: String) {
     use tokio::time::{sleep, Duration};
 
     let txid = match txid {
@@ -945,10 +964,7 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
         let _ = state.db.update_job_progress(&job_id, 5.0, "Fetching manifest transaction...");
     }
 
-    let tx_data = {
-        let state = state.read().await;
-        state.bitails.download_tx_raw(&txid).await
-    };
+    let tx_data = fetch_tx_raw(&state, &txid, &network).await;
 
     let tx_data = match tx_data {
         Ok(data) => data,
@@ -982,10 +998,7 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
                 );
             }
 
-            let chunk_tx_data = {
-                let state = state.read().await;
-                state.bitails.download_tx_raw(chunk_txid).await
-            };
+            let chunk_tx_data = fetch_tx_raw(&state, chunk_txid, &network).await;
 
             let chunk_tx_data = match chunk_tx_data {
                 Ok(data) => data,

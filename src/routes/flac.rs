@@ -212,6 +212,7 @@ pub async fn prepare_flac_upload(
 #[derive(Deserialize)]
 pub struct FlacDownloadRequest {
     pub txid: String,
+    pub network: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -227,6 +228,7 @@ pub async fn start_flac_download(
     Json(req): Json<FlacDownloadRequest>,
 ) -> impl IntoResponse {
     let txid = req.txid.trim().to_string();
+    let network = req.network.unwrap_or_else(|| "mainnet".to_string());
 
     if txid.len() != 64 {
         return (
@@ -262,7 +264,7 @@ pub async fn start_flac_download(
         track_title: None,
         cover_txid: None,
         lyrics: None,
-        network: None,
+        network: Some(network.clone()),
     };
 
     {
@@ -282,8 +284,9 @@ pub async fn start_flac_download(
     // Start download process
     let state_clone = state.clone();
     let job_id_clone = job_id.clone();
+    let network_clone = network.clone();
     tokio::spawn(async move {
-        crate::process_flac_download(state_clone, job_id_clone, Some(txid)).await;
+        crate::process_flac_download(state_clone, job_id_clone, Some(txid), network_clone).await;
     });
 
     (

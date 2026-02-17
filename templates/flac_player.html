@@ -593,6 +593,10 @@
             if (e.key === 'Enter') loadAudio();
         });
 
+        // Get network from URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        const networkParam = urlParams.get('network') || 'mainnet';
+
         async function loadAudio() {
             const txid = txidInput.value.trim();
             
@@ -611,7 +615,7 @@
                 const response = await fetch('/api/flac/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ txid })
+                    body: JSON.stringify({ txid, network: networkParam })
                 });
 
                 const data = await response.json();
