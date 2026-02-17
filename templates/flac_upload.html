@@ -409,6 +409,10 @@
                     <input type="text" id="trackTitle" placeholder="Enter track title">
                 </div>
                 <div class="form-group">
+                    <label for="artistName">Artist</label>
+                    <input type="text" id="artistName" placeholder="Enter artist name">
+                </div>
+                <div class="form-group">
                     <label for="coverInput">Cover Art</label>
                     <div class="cover-upload-zone" id="coverZone">
                         <span>Click to select image (JPG/PNG)</span>
@@ -621,10 +625,14 @@
             
                     // Add metadata
                     const trackTitle = document.getElementById('trackTitle').value.trim();
+                    const artistName = document.getElementById('artistName').value.trim();
                     const lyrics = document.getElementById('lyricsInput').value.trim();
             
                     if (trackTitle) {
                         formData.append('title', trackTitle);
+                    }
+                    if (artistName) {
+                        formData.append('artist', artistName);
                     }
                     if (selectedCover) {
                         formData.append('cover', selectedCover);

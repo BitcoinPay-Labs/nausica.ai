@@ -191,6 +191,12 @@
             word-break: break-word;
         }
 
+        .track-artist {
+            color: #00d4aa;
+            font-size: 1rem;
+            margin-bottom: 8px;
+        }
+
         .track-meta {
             color: #888;
             font-size: 0.9rem;
@@ -403,15 +409,55 @@
 
         .lyrics-content {
             color: #ccc;
-            white-space: pre-wrap;
             font-size: 0.95rem;
             line-height: 1.8;
-            max-height: 200px;
+            max-height: 300px;
             overflow-y: auto;
+            scroll-behavior: smooth;
         }
 
         .lyrics-content.expanded {
             max-height: none;
+        }
+
+        /* Karaoke-style lyrics */
+        .lyrics-line {
+            padding: 8px 12px;
+            margin: 4px 0;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .lyrics-line.active {
+            background: rgba(0, 212, 170, 0.15);
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .lyrics-line.past {
+            color: #666;
+        }
+
+        .lyrics-line-text {
+            position: relative;
+            display: inline;
+        }
+
+        .lyrics-line-fill {
+            position: absolute;
+            top: 0;
+            left: 0;
+            color: #00d4aa;
+            overflow: hidden;
+            white-space: nowrap;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+
+        .lyrics-line.active .lyrics-line-fill {
+            font-weight: 500;
         }
 
         /* Error state */
@@ -508,6 +554,7 @@
 
             <div class="track-info">
                 <div class="track-title" id="trackTitle">-</div>
+                <div class="track-artist" id="trackArtist"></div>
                 <div class="track-meta" id="trackMeta">FLAC • Blockchain Audio</div>
             </div>
 
@@ -665,12 +712,25 @@
             loadingSection.classList.remove('visible');
         }
 
+        // Global lyrics data for karaoke highlighting
+        let parsedLyrics = [];
+        let currentLyricIndex = -1;
+
         function showPlayer(data) {
             playerSection.classList.add('visible');
             
             // Set track title (prefer track_title over filename)
             const displayTitle = data.track_title || data.filename || 'Unknown Track';
             document.getElementById('trackTitle').textContent = displayTitle;
+            
+            // Set artist name if available
+            const trackArtist = document.getElementById('trackArtist');
+            if (data.artist_name) {
+                trackArtist.textContent = data.artist_name;
+                trackArtist.style.display = 'block';
+            } else {
+                trackArtist.style.display = 'none';
+            }
             
             // Set cover art if available
             const albumArt = document.getElementById('albumArt');
@@ -686,7 +746,15 @@
             const lyricsSection = document.getElementById('lyricsSection');
             const lyricsContent = document.getElementById('lyricsContent');
             if (data.lyrics) {
-                lyricsContent.textContent = data.lyrics;
+                // Parse LRC format lyrics
+                parsedLyrics = parseLRC(data.lyrics);
+                if (parsedLyrics.length > 0) {
+                    // Render karaoke-style lyrics
+                    renderKaraokeLyrics(lyricsContent, parsedLyrics);
+                } else {
+                    // Plain text lyrics
+                    lyricsContent.innerHTML = `<div class="lyrics-line"><span class="lyrics-line-text">${escapeHtml(data.lyrics)}</span></div>`;
+                }
                 lyricsSection.classList.add('visible');
             } else {
                 lyricsSection.classList.remove('visible');
@@ -698,6 +766,108 @@
             // Set download link
             document.getElementById('downloadBtn').href = data.download_link;
             document.getElementById('downloadBtn').download = data.filename || 'audio.flac';
+        }
+
+        // Parse LRC format lyrics
+        function parseLRC(lrcText) {
+            const lines = lrcText.split('\n');
+            const lyrics = [];
+            const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/g;
+            
+            for (const line of lines) {
+                const matches = [...line.matchAll(timeRegex)];
+                if (matches.length > 0) {
+                    const text = line.replace(timeRegex, '').trim();
+                    if (text) {
+                        for (const match of matches) {
+                            const minutes = parseInt(match[1]);
+                            const seconds = parseInt(match[2]);
+                            const ms = parseInt(match[3].padEnd(3, '0'));
+                            const time = minutes * 60 + seconds + ms / 1000;
+                            lyrics.push({ time, text });
+                        }
+                    }
+                }
+            }
+            
+            // Sort by time
+            lyrics.sort((a, b) => a.time - b.time);
+            return lyrics;
+        }
+
+        // Render karaoke-style lyrics
+        function renderKaraokeLyrics(container, lyrics) {
+            container.innerHTML = '';
+            lyrics.forEach((lyric, index) => {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'lyrics-line';
+                lineDiv.dataset.index = index;
+                lineDiv.innerHTML = `
+                    <span class="lyrics-line-text">${escapeHtml(lyric.text)}</span>
+                    <span class="lyrics-line-fill">${escapeHtml(lyric.text)}</span>
+                `;
+                container.appendChild(lineDiv);
+            });
+        }
+
+        // Update karaoke highlighting based on current time
+        function updateKaraokeHighlight(currentTime) {
+            if (parsedLyrics.length === 0) return;
+            
+            // Find current lyric index
+            let newIndex = -1;
+            for (let i = 0; i < parsedLyrics.length; i++) {
+                if (currentTime >= parsedLyrics[i].time) {
+                    newIndex = i;
+                } else {
+                    break;
+                }
+            }
+            
+            if (newIndex !== currentLyricIndex) {
+                currentLyricIndex = newIndex;
+                
+                // Update all lines
+                const lines = document.querySelectorAll('.lyrics-line');
+                lines.forEach((line, index) => {
+                    line.classList.remove('active', 'past');
+                    const fill = line.querySelector('.lyrics-line-fill');
+                    if (fill) fill.style.width = '0%';
+                    
+                    if (index < currentLyricIndex) {
+                        line.classList.add('past');
+                        if (fill) fill.style.width = '100%';
+                    } else if (index === currentLyricIndex) {
+                        line.classList.add('active');
+                        // Scroll to current line
+                        line.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                });
+            }
+            
+            // Update fill progress for current line
+            if (currentLyricIndex >= 0 && currentLyricIndex < parsedLyrics.length) {
+                const currentLine = document.querySelector(`.lyrics-line[data-index="${currentLyricIndex}"]`);
+                if (currentLine) {
+                    const fill = currentLine.querySelector('.lyrics-line-fill');
+                    if (fill) {
+                        const startTime = parsedLyrics[currentLyricIndex].time;
+                        const endTime = currentLyricIndex < parsedLyrics.length - 1 
+                            ? parsedLyrics[currentLyricIndex + 1].time 
+                            : startTime + 5; // Default 5 seconds for last line
+                        const duration = endTime - startTime;
+                        const elapsed = currentTime - startTime;
+                        const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100));
+                        fill.style.width = progress + '%';
+                    }
+                }
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Lyrics toggle functionality
@@ -738,6 +908,9 @@
             progressFill.style.width = progress + '%';
             progressHandle.style.left = progress + '%';
             currentTimeEl.textContent = formatTime(audioPlayer.currentTime);
+            
+            // Update karaoke highlighting
+            updateKaraokeHighlight(audioPlayer.currentTime);
         });
 
         audioPlayer.addEventListener('loadedmetadata', () => {

@@ -48,6 +48,7 @@ pub async fn prepare_flac_upload(
     let mut filename: Option<String> = None;
     let mut file_data: Option<Vec<u8>> = None;
     let mut track_title: Option<String> = None;
+    let mut artist_name: Option<String> = None;
     let mut cover_data: Option<Vec<u8>> = None;
     let mut cover_filename: Option<String> = None;
     let mut lyrics: Option<String> = None;
@@ -68,6 +69,13 @@ pub async fn prepare_flac_upload(
                 if let Ok(data) = field.text().await {
                     if !data.trim().is_empty() {
                         track_title = Some(data.trim().to_string());
+                    }
+                }
+            }
+            "artist" => {
+                if let Ok(data) = field.text().await {
+                    if !data.trim().is_empty() {
+                        artist_name = Some(data.trim().to_string());
                     }
                 }
             }
@@ -178,11 +186,6 @@ pub async fn prepare_flac_upload(
     let job_id = uuid::Uuid::new_v4().to_string().replace("-", "");
     let now = chrono::Utc::now();
 
-    // Store cover data temporarily for later upload (will be uploaded when payment is confirmed)
-    // For now, we store cover_data in a separate field or handle it during processing
-    let _ = cover_data; // Will be used in future for BSV upload
-    let _ = cover_filename; // Will be used in future for BSV upload
-
     // If admin pay is enabled, start processing immediately
     let (initial_status, initial_message) = if use_admin_pay {
         (JobStatus::Processing, "Admin pay enabled, starting upload...".to_string())
@@ -207,7 +210,9 @@ pub async fn prepare_flac_upload(
         created_at: now,
         updated_at: now,
         track_title,
+        artist_name,
         cover_txid: None, // Will be set after cover image is uploaded to BSV
+        cover_data,
         lyrics,
         network: Some(network.clone()),
     };
@@ -312,7 +317,9 @@ pub async fn start_flac_download(
         created_at: now,
         updated_at: now,
         track_title: None,
+        artist_name: None,
         cover_txid: None,
+        cover_data: None,
         lyrics: None,
         network: Some(network.clone()),
     };
@@ -358,6 +365,7 @@ pub struct FlacStatusResponse {
     pub download_link: Option<String>,
     pub filename: Option<String>,
     pub track_title: Option<String>,
+    pub artist_name: Option<String>,
     pub cover_txid: Option<String>,
     pub lyrics: Option<String>,
 }
@@ -386,6 +394,7 @@ pub async fn get_flac_status(
                 download_link: job.download_link,
                 filename: job.filename,
                 track_title: job.track_title,
+                artist_name: job.artist_name,
                 cover_txid: job.cover_txid,
                 lyrics: job.lyrics,
             })
@@ -398,6 +407,7 @@ pub async fn get_flac_status(
             download_link: None,
             filename: None,
             track_title: None,
+            artist_name: None,
             cover_txid: None,
             lyrics: None,
         }),
@@ -409,6 +419,7 @@ pub async fn get_flac_status(
             download_link: None,
             filename: None,
             track_title: None,
+            artist_name: None,
             cover_txid: None,
             lyrics: None,
         }),

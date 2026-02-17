@@ -46,7 +46,9 @@ impl Database {
 
         // Add new columns if they don't exist (for migration)
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN track_title TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN artist_name TEXT", []);
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN cover_txid TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN cover_data BLOB", []);
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN lyrics TEXT", []);
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN network TEXT", []);
 
@@ -82,8 +84,8 @@ impl Database {
                 id, job_type, status, filename, file_size, file_data,
                 payment_address, payment_wif, required_satoshis,
                 manifest_txid, download_link, message, progress,
-                created_at, updated_at, track_title, cover_txid, lyrics, network
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 job.id,
                 job.job_type.as_str(),
@@ -101,7 +103,9 @@ impl Database {
                 job.created_at.to_rfc3339(),
                 job.updated_at.to_rfc3339(),
                 job.track_title,
+                job.artist_name,
                 job.cover_txid,
+                job.cover_data,
                 job.lyrics,
                 job.network,
             ],
@@ -115,7 +119,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at, track_title, cover_txid, lyrics, network
+                    created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
              FROM jobs WHERE id = ?1",
         )?;
 
@@ -134,7 +138,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at, track_title, cover_txid, lyrics, network
+                    created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
              FROM jobs WHERE status = 'processing'",
         )?;
 
@@ -154,7 +158,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at, track_title, cover_txid, lyrics, network
+                    created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
              FROM jobs WHERE status = 'pending_payment'",
         )?;
 
@@ -290,9 +294,11 @@ impl Database {
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
             track_title: row.get(15).ok(),
-            cover_txid: row.get(16).ok(),
-            lyrics: row.get(17).ok(),
-            network: row.get(18).ok(),
+            artist_name: row.get(16).ok(),
+            cover_txid: row.get(17).ok(),
+            cover_data: row.get(18).ok(),
+            lyrics: row.get(19).ok(),
+            network: row.get(20).ok(),
         })
     }
 

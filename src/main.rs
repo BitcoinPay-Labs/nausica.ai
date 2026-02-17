@@ -284,7 +284,9 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
                 job.filename,
                 network,
                 job.track_title,
+                job.artist_name,
                 job.lyrics,
+                job.cover_data,
             ).await;
         }
         JobType::Download => {
@@ -448,7 +450,9 @@ async fn process_flac_upload(
     filename: Option<String>,
     network: String,
     track_title: Option<String>,
+    artist_name: Option<String>,
     lyrics: Option<String>,
+    _cover_data: Option<Vec<u8>>,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -721,13 +725,15 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 85.0, "Creating manifest...");
         }
 
-        // Create manifest script with title and lyrics
+        // Create manifest script with title, artist, and lyrics
         let manifest_script = BsvService::create_flac_manifest_script(
             &filename,
             file_size,
             &chunk_txids,
             track_title.as_deref(),
+            artist_name.as_deref(),
             lyrics.as_deref(),
+            None, // cover_txid - TODO: upload cover image first and get txid
         );
 
         // Use the last split UTXO for manifest (vout = total_chunks)
@@ -1199,7 +1205,9 @@ struct ManifestMetadata {
     filename: String,
     chunk_txids: Vec<String>,
     title: Option<String>,
+    artist: Option<String>,
     lyrics: Option<String>,
+    cover_txid: Option<String>,
 }
 
 fn parse_flac_manifest_script(script: &[u8]) -> Option<ManifestMetadata> {
@@ -1227,14 +1235,16 @@ fn parse_flac_manifest_script(script: &[u8]) -> Option<ManifestMetadata> {
     
     let filename = String::from_utf8_lossy(&push_data_items[1]).to_string();
     
-    // Parse metadata JSON to extract title and lyrics
+    // Parse metadata JSON to extract title, artist, lyrics, and cover_txid
     let metadata_str = String::from_utf8_lossy(&push_data_items[2]);
-    let (title, lyrics) = if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&metadata_str) {
+    let (title, artist, lyrics, cover_txid) = if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&metadata_str) {
         let title = metadata["title"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let artist = metadata["artist"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
         let lyrics = metadata["lyrics"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
-        (title, lyrics)
+        let cover_txid = metadata["cover_txid"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        (title, artist, lyrics, cover_txid)
     } else {
-        (None, None)
+        (None, None, None, None)
     };
     
     let chunk_txids: Vec<String> = push_data_items[3..]
@@ -1250,7 +1260,9 @@ fn parse_flac_manifest_script(script: &[u8]) -> Option<ManifestMetadata> {
         filename,
         chunk_txids,
         title,
+        artist,
         lyrics,
+        cover_txid,
     })
 }
 
