@@ -327,3 +327,69 @@ async fn fetch_testnet_balance(address: &str) -> Result<i64, String> {
     
     Ok(confirmed + unconfirmed)
 }
+
+#[derive(Deserialize)]
+pub struct CheckAdminPayRequest {
+    pub network: String,
+}
+
+#[derive(Serialize)]
+pub struct CheckAdminPayResponse {
+    pub admin_pay_enabled: bool,
+    pub admin_wallet_address: Option<String>,
+}
+
+/// Check if admin pay is enabled for a network (public API, no auth required)
+pub async fn check_admin_pay(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<CheckAdminPayRequest>,
+) -> Json<CheckAdminPayResponse> {
+    let state = state.read().await;
+    
+    match state.db.get_admin_config() {
+        Ok(config) => {
+            let (enabled, wif) = if req.network == "testnet" {
+                (config.admin_pay_testnet, config.testnet_wif)
+            } else {
+                (config.admin_pay_mainnet, config.mainnet_wif)
+            };
+            
+            let address = wif.and_then(|w| {
+                BsvService::wif_to_address(&w, &req.network).ok()
+            });
+            
+            Json(CheckAdminPayResponse {
+                admin_pay_enabled: enabled && address.is_some(),
+                admin_wallet_address: if enabled { address } else { None },
+            })
+        }
+        Err(_) => {
+            Json(CheckAdminPayResponse {
+                admin_pay_enabled: false,
+                admin_wallet_address: None,
+            })
+        }
+    }
+}
+
+/// Get admin WIF for a network (internal use only)
+pub fn get_admin_wif_for_network(db: &crate::db::Database, network: &str) -> Option<String> {
+    match db.get_admin_config() {
+        Ok(config) => {
+            if network == "testnet" {
+                if config.admin_pay_testnet {
+                    config.testnet_wif
+                } else {
+                    None
+                }
+            } else {
+                if config.admin_pay_mainnet {
+                    config.mainnet_wif
+                } else {
+                    None
+                }
+            }
+        }
+        Err(_) => None,
+    }
+}

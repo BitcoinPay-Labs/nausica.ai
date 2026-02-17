@@ -593,53 +593,93 @@
             return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
         }
 
-        // Upload
-        uploadBtn.addEventListener('click', async () => {
-            if (!selectedFile) return;
+                // Check if admin pay is enabled for the selected network
+                async function checkAdminPay() {
+                    try {
+                        const response = await fetch('/api/admin/check-pay', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ network: selectedNetwork })
+                        });
+                        return await response.json();
+                    } catch (error) {
+                        console.error('Failed to check admin pay:', error);
+                        return { admin_pay_enabled: false };
+                    }
+                }
 
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = 'Preparing...';
+                // Upload
+                uploadBtn.addEventListener('click', async () => {
+                    if (!selectedFile) return;
 
-            const formData = new FormData();
-            formData.append('file', selectedFile);
-            formData.append('network', selectedNetwork);
+                    uploadBtn.disabled = true;
+                    uploadBtn.textContent = 'Preparing...';
+
+                    const formData = new FormData();
+                    formData.append('file', selectedFile);
+                    formData.append('network', selectedNetwork);
             
-            // Add metadata
-            const trackTitle = document.getElementById('trackTitle').value.trim();
-            const lyrics = document.getElementById('lyricsInput').value.trim();
+                    // Add metadata
+                    const trackTitle = document.getElementById('trackTitle').value.trim();
+                    const lyrics = document.getElementById('lyricsInput').value.trim();
             
-            if (trackTitle) {
-                formData.append('title', trackTitle);
-            }
-            if (selectedCover) {
-                formData.append('cover', selectedCover);
-            }
-            if (lyrics) {
-                formData.append('lyrics', lyrics);
-            }
+                    if (trackTitle) {
+                        formData.append('title', trackTitle);
+                    }
+                    if (selectedCover) {
+                        formData.append('cover', selectedCover);
+                    }
+                    if (lyrics) {
+                        formData.append('lyrics', lyrics);
+                    }
 
-            try {
-                const response = await fetch('/api/flac/upload', {
-                    method: 'POST',
-                    body: formData
+                    // Check if admin pay is enabled
+                    const adminPayStatus = await checkAdminPay();
+                    if (adminPayStatus.admin_pay_enabled) {
+                        formData.append('admin_pay', 'true');
+                    }
+
+                    try {
+                        const response = await fetch('/api/flac/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            currentJobId = data.job_id;
+                            if (data.admin_pay) {
+                                // Admin pay is enabled, skip payment section
+                                showAdminPayProcessing(data);
+                            } else {
+                                showPaymentSection(data);
+                            }
+                        } else {
+                            alert('Error: ' + data.error);
+                            uploadBtn.disabled = false;
+                            uploadBtn.textContent = 'Prepare Upload';
+                        }
+                    } catch (error) {
+                        alert('Upload failed: ' + error.message);
+                        uploadBtn.disabled = false;
+                        uploadBtn.textContent = 'Prepare Upload';
+                    }
                 });
 
-                const data = await response.json();
-
-                if (data.success) {
-                    currentJobId = data.job_id;
-                    showPaymentSection(data);
-                } else {
-                    alert('Error: ' + data.error);
-                    uploadBtn.disabled = false;
-                    uploadBtn.textContent = 'Prepare Upload';
+                function showAdminPayProcessing(data) {
+                    uploadSection.style.display = 'none';
+                    paymentSection.classList.add('visible');
+            
+                    document.getElementById('paymentAmount').textContent = 'Admin Pay Enabled';
+                    document.getElementById('paymentAddress').textContent = 'Payment handled by admin wallet';
+                    document.getElementById('qrCode').style.display = 'none';
+                    document.getElementById('copyBtn').style.display = 'none';
+                    document.getElementById('statusMessage').innerHTML = '⏳ Processing upload with admin wallet...';
+            
+                    // Start polling for status
+                    pollPaymentStatus();
                 }
-            } catch (error) {
-                alert('Upload failed: ' + error.message);
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = 'Prepare Upload';
-            }
-        });
 
         function showPaymentSection(data) {
             uploadSection.style.display = 'none';

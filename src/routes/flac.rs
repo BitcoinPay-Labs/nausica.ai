@@ -36,6 +36,7 @@ pub struct FlacUploadResponse {
     pub job_id: Option<String>,
     pub payment_address: Option<String>,
     pub required_satoshis: Option<i64>,
+    pub admin_pay: bool,
     pub error: Option<String>,
 }
 
@@ -51,6 +52,7 @@ pub async fn prepare_flac_upload(
     let mut cover_filename: Option<String> = None;
     let mut lyrics: Option<String> = None;
     let mut network: String = "mainnet".to_string();
+    let mut admin_pay_requested: bool = false;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -92,6 +94,11 @@ pub async fn prepare_flac_upload(
                     }
                 }
             }
+            "admin_pay" => {
+                if let Ok(data) = field.text().await {
+                    admin_pay_requested = data.trim().to_lowercase() == "true";
+                }
+            }
             _ => {}
         }
     }
@@ -99,16 +106,17 @@ pub async fn prepare_flac_upload(
     let file_data = match file_data {
         Some(data) => data,
         None => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(FlacUploadResponse {
-                    success: false,
-                    job_id: None,
-                    payment_address: None,
-                    required_satoshis: None,
-                    error: Some("No file provided".to_string()),
-                }),
-            );
+                        return (
+                            StatusCode::BAD_REQUEST,
+                            Json(FlacUploadResponse {
+                                success: false,
+                                job_id: None,
+                                payment_address: None,
+                                required_satoshis: None,
+                                admin_pay: false,
+                                error: Some("No file provided".to_string()),
+                            }),
+                        );
         }
     };
 
@@ -117,20 +125,36 @@ pub async fn prepare_flac_upload(
     // Validate audio file (FLAC, WAV, or MP3)
     let lower_filename = filename.to_lowercase();
     if !lower_filename.ends_with(".flac") && !lower_filename.ends_with(".wav") && !lower_filename.ends_with(".mp3") {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(FlacUploadResponse {
-                success: false,
-                job_id: None,
-                payment_address: None,
-                required_satoshis: None,
-                error: Some("Only FLAC, WAV, and MP3 files are supported".to_string()),
-            }),
-        );
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(FlacUploadResponse {
+                        success: false,
+                        job_id: None,
+                        payment_address: None,
+                        required_satoshis: None,
+                        admin_pay: false,
+                        error: Some("Only FLAC, WAV, and MP3 files are supported".to_string()),
+                    }),
+                );
     }
 
-    // Generate payment keypair based on selected network
-    let (wif, address) = BsvService::generate_keypair(&network);
+    // Check if admin pay is enabled and get admin WIF
+    let admin_wif = if admin_pay_requested {
+        let state_read = state.read().await;
+        crate::routes::admin::get_admin_wif_for_network(&state_read.db, &network)
+    } else {
+        None
+    };
+    let use_admin_pay = admin_wif.is_some();
+
+    // Generate payment keypair based on selected network (or use admin wallet)
+    let (wif, address) = if let Some(ref admin_wif_value) = admin_wif {
+        let addr = BsvService::wif_to_address(admin_wif_value, &network)
+            .unwrap_or_else(|_| "invalid".to_string());
+        (admin_wif_value.clone(), addr)
+    } else {
+        BsvService::generate_keypair(&network)
+    };
 
     // Calculate required satoshis
     // For large files, we need to account for UTXO splitting and multiple chunk transactions
@@ -159,10 +183,17 @@ pub async fn prepare_flac_upload(
     let _ = cover_data; // Will be used in future for BSV upload
     let _ = cover_filename; // Will be used in future for BSV upload
 
+    // If admin pay is enabled, start processing immediately
+    let (initial_status, initial_message) = if use_admin_pay {
+        (JobStatus::Processing, "Admin pay enabled, starting upload...".to_string())
+    } else {
+        (JobStatus::PendingPayment, "Waiting for payment...".to_string())
+    };
+
     let job = Job {
         id: job_id.clone(),
         job_type: JobType::FlacUpload,
-        status: JobStatus::PendingPayment,
+        status: initial_status,
         filename: Some(filename),
         file_size: Some(file_data.len() as i64),
         file_data: Some(file_data),
@@ -172,13 +203,13 @@ pub async fn prepare_flac_upload(
         manifest_txid: None,
         download_link: None,
         progress: 0.0,
-        message: "Waiting for payment...".to_string(),
+        message: initial_message,
         created_at: now,
         updated_at: now,
         track_title,
         cover_txid: None, // Will be set after cover image is uploaded to BSV
         lyrics,
-        network: Some(network),
+        network: Some(network.clone()),
     };
 
     {
@@ -191,19 +222,38 @@ pub async fn prepare_flac_upload(
                     job_id: None,
                     payment_address: None,
                     required_satoshis: None,
+                    admin_pay: false,
                     error: Some(format!("Failed to create job: {}", e)),
                 }),
             );
         }
     }
 
+        // If admin pay is enabled, start processing immediately
+        if use_admin_pay {
+            let state_clone = state.clone();
+            let job_id_clone = job_id.clone();
+            let address_clone = address.clone();
+            let network_clone = network.clone();
+            tokio::spawn(async move {
+                crate::process_job(
+                    state_clone, 
+                    job_id_clone, 
+                    crate::models::job::JobType::FlacUpload,
+                    address_clone,
+                    network_clone
+                ).await;
+            });
+        }
+
     (
         StatusCode::OK,
         Json(FlacUploadResponse {
             success: true,
             job_id: Some(job_id),
-            payment_address: Some(address),
-            required_satoshis: Some(required_satoshis),
+            payment_address: if use_admin_pay { None } else { Some(address) },
+            required_satoshis: if use_admin_pay { None } else { Some(required_satoshis) },
+            admin_pay: use_admin_pay,
             error: None,
         }),
     )

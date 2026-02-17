@@ -88,12 +88,13 @@ async fn main() {
         .route("/api/wallet/import", post(routes::wallet::import_wif))
         .route("/api/wallet/balance", post(routes::wallet::get_balance))
         .route("/api/wallet/send", post(routes::wallet::send_bsv))
-        // Admin panel
-        .route("/admin", get(routes::admin::admin_page))
-        .route("/api/admin/verify", post(routes::admin::verify_admin_key))
-        .route("/api/admin/config", post(routes::admin::get_admin_config))
-        .route("/api/admin/config/update", post(routes::admin::update_admin_config))
-        .route("/api/admin/wallet/balance", post(routes::admin::get_admin_wallet_balance))
+                // Admin panel
+                .route("/admin", get(routes::admin::admin_page))
+                .route("/api/admin/verify", post(routes::admin::verify_admin_key))
+                .route("/api/admin/config", post(routes::admin::get_admin_config))
+                .route("/api/admin/config/update", post(routes::admin::update_admin_config))
+                .route("/api/admin/wallet/balance", post(routes::admin::get_admin_wallet_balance))
+                .route("/api/admin/check-pay", post(routes::admin::check_admin_pay))
         // Static files and downloads
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/downloads", ServeDir::new("./data/downloads"))
