@@ -453,7 +453,7 @@ async fn process_flac_upload(
     track_title: Option<String>,
     artist_name: Option<String>,
     lyrics: Option<String>,
-    _cover_data: Option<Vec<u8>>,
+    cover_data: Option<Vec<u8>>,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -523,6 +523,96 @@ async fn process_flac_upload(
             let _ = state.db.update_job_error(&job_id, &format!("Failed to create script: {}", e));
             return;
         }
+    };
+
+    // Upload cover image to BSV if present
+    let cover_txid: Option<String> = if let Some(ref cover_bytes) = cover_data {
+        {
+            let state = state.read().await;
+            let _ = state.db.update_job_progress(&job_id, 3.0, "Uploading cover image...");
+        }
+        
+        // Create cover image transaction
+        let cover_script = BsvService::create_cover_image_script(cover_bytes);
+        
+        // Use first UTXO for cover image
+        if utxos.is_empty() {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, "No UTXOs for cover image");
+            return;
+        }
+        
+        let cover_utxo = utxos.remove(0);
+        let cover_utxo_input = vec![(
+            cover_utxo.txid.clone(),
+            cover_utxo.vout,
+            cover_utxo.satoshis,
+            script_pubkey.clone(),
+        )];
+        
+        // Calculate change
+        let cover_tx_size = 150 + cover_script.len();
+        let cover_fee = {
+            let state = state.read().await;
+            (cover_tx_size as f64 * state.bsv.fee_rate).ceil() as i64
+        };
+        
+        let change_amount = cover_utxo.satoshis - cover_fee - 1;
+        let mut outputs: Vec<(Vec<u8>, i64)> = vec![(cover_script, 1)];
+        if change_amount > 546 {
+            outputs.push((script_pubkey.clone(), change_amount));
+        }
+        
+        let cover_raw_tx = {
+            let state = state.read().await;
+            state.bsv.create_transaction(&wif, &cover_utxo_input, &outputs)
+        };
+        
+        let cover_raw_tx = match cover_raw_tx {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::warn!("Failed to create cover tx: {}", e);
+                String::new()
+            }
+        };
+        
+        if cover_raw_tx.is_empty() {
+            None
+        } else {
+            // Broadcast cover image transaction
+            let cover_broadcast_result = if network == "testnet" {
+                broadcast_testnet_tx(&cover_raw_tx).await
+            } else {
+                let state = state.read().await;
+                state.bitails.broadcast_transaction(&cover_raw_tx).await
+            };
+            
+            match cover_broadcast_result {
+                Ok(txid) => {
+                    tracing::info!("Cover image uploaded: {}", txid);
+                    // Add change output as new UTXO if we created one
+                    if change_amount > 546 {
+                        utxos.insert(0, Utxo {
+                            txid: txid.clone(),
+                            vout: 1,
+                            satoshis: change_amount,
+                            script_pubkey: String::new(),
+                            blockheight: Some(0),
+                            confirmations: Some(0),
+                        });
+                    }
+                    // Wait for propagation
+                    sleep(Duration::from_millis(1000)).await;
+                    Some(txid)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to broadcast cover image: {}", e);
+                    None
+                }
+            }
+        }
+    } else {
+        None
     };
 
     if needs_chunking {
@@ -726,7 +816,7 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 85.0, "Creating manifest...");
         }
 
-        // Create manifest script with title, artist, and lyrics
+        // Create manifest script with title, artist, lyrics, and cover
         let manifest_script = BsvService::create_flac_manifest_script(
             &filename,
             file_size,
@@ -734,7 +824,7 @@ async fn process_flac_upload(
             track_title.as_deref(),
             artist_name.as_deref(),
             lyrics.as_deref(),
-            None, // cover_txid - TODO: upload cover image first and get txid
+            cover_txid.as_deref(),
         );
 
         // Use the last split UTXO for manifest (vout = total_chunks)

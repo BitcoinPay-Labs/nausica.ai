@@ -539,6 +539,35 @@ impl BsvService {
         script
     }
 
+    /// Create cover image script for storing album art on BSV
+    /// Format:
+    ///   OP_FALSE (0x00)
+    ///   OP_IF (0x63)
+    ///     PUSHDATA "coverart"
+    ///     PUSHDATA <image_data>
+    ///   OP_ENDIF (0x68)
+    pub fn create_cover_image_script(image_data: &[u8]) -> Vec<u8> {
+        let mut script = Vec::new();
+
+        // OP_FALSE OP_IF
+        script.push(0x00); // OP_FALSE
+        script.push(0x63); // OP_IF
+
+        // Protocol identifier
+        Self::push_data(&mut script, b"coverart");
+
+        // Image data (may need to be split into chunks if large)
+        let max_chunk_size = 520; // Max push data size
+        for chunk in image_data.chunks(max_chunk_size) {
+            Self::push_data(&mut script, chunk);
+        }
+
+        // OP_ENDIF
+        script.push(0x68);
+
+        script
+    }
+
     /// Create FLAC manifest script that references chunk transactions
     /// Format:
     ///   OP_FALSE (0x00)
