@@ -721,9 +721,8 @@
             // Set cover art if available
             const albumArt = document.getElementById('albumArt');
             if (data.cover_txid) {
-                // Load cover image from BSV (future implementation)
-                // For now, show placeholder
-                albumArt.innerHTML = '🎵';
+                // Load cover image from BSV
+                loadCoverImage(data.cover_txid, albumArt);
             } else {
                 albumArt.innerHTML = '🎵';
             }
@@ -830,6 +829,38 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Load cover image from BSV transaction
+        async function loadCoverImage(coverTxid, albumArtElement) {
+            albumArtElement.innerHTML = '<div class="loading-spinner" style="width:40px;height:40px;"></div>';
+            
+            try {
+                const response = await fetch('/api/flac/cover', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ txid: coverTxid, network: networkParam })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    const img = document.createElement('img');
+                    img.src = `data:${data.content_type || 'image/png'};base64,${data.data}`;
+                    img.alt = 'Album Cover';
+                    img.onerror = () => {
+                        albumArtElement.innerHTML = '🎵';
+                    };
+                    albumArtElement.innerHTML = '';
+                    albumArtElement.appendChild(img);
+                } else {
+                    console.error('Failed to load cover:', data.error);
+                    albumArtElement.innerHTML = '🎵';
+                }
+            } catch (error) {
+                console.error('Error loading cover image:', error);
+                albumArtElement.innerHTML = '🎵';
+            }
         }
 
         // Lyrics toggle functionality

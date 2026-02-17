@@ -79,10 +79,11 @@ async fn main() {
         .route("/start_download", post(routes::download::start_download))
         .route("/status_update/:job_id", get(routes::status::status_update))
         .route("/api/jobs", get(routes::dashboard::get_jobs))
-        // FLAC API endpoints
-        .route("/api/flac/upload", post(routes::flac::prepare_flac_upload))
-        .route("/api/flac/download", post(routes::flac::start_flac_download))
-        .route("/api/flac/status/:job_id", get(routes::flac::get_flac_status))
+                // FLAC API endpoints
+                .route("/api/flac/upload", post(routes::flac::prepare_flac_upload))
+                .route("/api/flac/download", post(routes::flac::start_flac_download))
+                .route("/api/flac/status/:job_id", get(routes::flac::get_flac_status))
+                .route("/api/flac/cover", post(routes::flac::get_cover_image))
         // Wallet API endpoints
         .route("/api/wallet/generate", post(routes::wallet::generate_wallet))
         .route("/api/wallet/import", post(routes::wallet::import_wif))

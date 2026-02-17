@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     response::{Html, IntoResponse, Json},
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -368,6 +369,166 @@ pub struct FlacStatusResponse {
     pub artist_name: Option<String>,
     pub cover_txid: Option<String>,
     pub lyrics: Option<String>,
+}
+
+/// Get cover image from BSV transaction
+#[derive(Deserialize)]
+pub struct CoverRequest {
+    pub txid: String,
+    pub network: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CoverResponse {
+    pub success: bool,
+    pub data: Option<String>,  // Base64 encoded image data
+    pub content_type: Option<String>,
+    pub error: Option<String>,
+}
+
+pub async fn get_cover_image(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<CoverRequest>,
+) -> impl IntoResponse {
+    let txid = req.txid.trim().to_string();
+    let network = req.network.unwrap_or_else(|| "mainnet".to_string());
+
+    if txid.len() != 64 {
+        return Json(CoverResponse {
+            success: false,
+            data: None,
+            content_type: None,
+            error: Some("Invalid TXID format".to_string()),
+        });
+    }
+
+    // Fetch transaction from blockchain
+    let tx_data = crate::fetch_tx_raw(&state, &txid, &network).await;
+    
+    match tx_data {
+        Ok(tx_hex) => {
+            // Extract image data from transaction
+            if let Some(image_data) = extract_image_from_tx(&tx_hex) {
+                let base64_data = base64::engine::general_purpose::STANDARD.encode(&image_data);
+                
+                // Detect content type from magic bytes
+                let content_type = detect_image_type(&image_data);
+                
+                Json(CoverResponse {
+                    success: true,
+                    data: Some(base64_data),
+                    content_type: Some(content_type),
+                    error: None,
+                })
+            } else {
+                Json(CoverResponse {
+                    success: false,
+                    data: None,
+                    content_type: None,
+                    error: Some("No image data found in transaction".to_string()),
+                })
+            }
+        }
+        Err(e) => {
+            Json(CoverResponse {
+                success: false,
+                data: None,
+                content_type: None,
+                error: Some(format!("Failed to fetch transaction: {}", e)),
+            })
+        }
+    }
+}
+
+fn extract_image_from_tx(tx_hex: &str) -> Option<Vec<u8>> {
+    let tx_bytes = hex::decode(tx_hex).ok()?;
+    
+    let mut i = 0;
+    i += 4; // version
+    
+    let (input_count, varint_size) = crate::read_varint(&tx_bytes[i..])?;
+    i += varint_size;
+    
+    for _ in 0..input_count {
+        i += 32;
+        i += 4;
+        let (script_len, vs) = crate::read_varint(&tx_bytes[i..])?;
+        i += vs;
+        i += script_len as usize;
+        i += 4;
+    }
+    
+    let (output_count, varint_size) = crate::read_varint(&tx_bytes[i..])?;
+    i += varint_size;
+    
+    for _ in 0..output_count {
+        i += 8; // value
+        let (script_len, vs) = crate::read_varint(&tx_bytes[i..])?;
+        i += vs;
+        
+        if i + script_len as usize > tx_bytes.len() {
+            break;
+        }
+        
+        let script = &tx_bytes[i..i + script_len as usize];
+        i += script_len as usize;
+        
+        // Check for OP_RETURN (0x6a) or OP_FALSE OP_RETURN (0x00 0x6a)
+        if script.len() > 2 && (script[0] == 0x6a || (script[0] == 0x00 && script[1] == 0x6a)) {
+            let start = if script[0] == 0x6a { 1 } else { 2 };
+            if let Some(data) = parse_image_script(&script[start..]) {
+                return Some(data);
+            }
+        }
+    }
+    
+    None
+}
+
+fn parse_image_script(script: &[u8]) -> Option<Vec<u8>> {
+    let mut i = 0;
+    
+    // Skip protocol identifier if present
+    if let Some((data, size)) = crate::read_push_data(&script[i..]) {
+        let data_str = String::from_utf8_lossy(&data);
+        if data_str == "NAUSICA_COVER" || data_str == "19HxigV4QyBv3tHpQVcUEQyq1pzZVdoAut" {
+            i += size;
+        }
+    }
+    
+    // Read image data
+    if i < script.len() {
+        if let Some((data, _)) = crate::read_push_data(&script[i..]) {
+            // Check if it looks like image data (PNG, JPEG, etc.)
+            if data.len() > 4 {
+                return Some(data);
+            }
+        }
+    }
+    
+    None
+}
+
+fn detect_image_type(data: &[u8]) -> String {
+    if data.len() >= 8 {
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        if data[0..8] == [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A] {
+            return "image/png".to_string();
+        }
+        // JPEG: FF D8 FF
+        if data[0..3] == [0xFF, 0xD8, 0xFF] {
+            return "image/jpeg".to_string();
+        }
+        // GIF: 47 49 46 38
+        if data[0..4] == [0x47, 0x49, 0x46, 0x38] {
+            return "image/gif".to_string();
+        }
+        // WebP: 52 49 46 46 ... 57 45 42 50
+        if data[0..4] == [0x52, 0x49, 0x46, 0x46] && data.len() >= 12 && data[8..12] == [0x57, 0x45, 0x42, 0x50] {
+            return "image/webp".to_string();
+        }
+    }
+    "image/png".to_string() // Default
 }
 
 /// Get FLAC job status
