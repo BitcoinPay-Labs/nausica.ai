@@ -88,6 +88,12 @@ async fn main() {
         .route("/api/wallet/import", post(routes::wallet::import_wif))
         .route("/api/wallet/balance", post(routes::wallet::get_balance))
         .route("/api/wallet/send", post(routes::wallet::send_bsv))
+        // Admin panel
+        .route("/admin", get(routes::admin::admin_page))
+        .route("/api/admin/verify", post(routes::admin::verify_admin_key))
+        .route("/api/admin/config", post(routes::admin::get_admin_config))
+        .route("/api/admin/config/update", post(routes::admin::update_admin_config))
+        .route("/api/admin/wallet/balance", post(routes::admin::get_admin_wallet_balance))
         // Static files and downloads
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/downloads", ServeDir::new("./data/downloads"))
@@ -276,6 +282,8 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
                 job.file_data,
                 job.filename,
                 network,
+                job.track_title,
+                job.lyrics,
             ).await;
         }
         JobType::Download => {
@@ -438,6 +446,8 @@ async fn process_flac_upload(
     file_data: Option<Vec<u8>>,
     filename: Option<String>,
     network: String,
+    track_title: Option<String>,
+    lyrics: Option<String>,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -710,11 +720,13 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 85.0, "Creating manifest...");
         }
 
-        // Create manifest script
+        // Create manifest script with title and lyrics
         let manifest_script = BsvService::create_flac_manifest_script(
             &filename,
             file_size,
             &chunk_txids,
+            track_title.as_deref(),
+            lyrics.as_deref(),
         );
 
         // Use the last split UTXO for manifest (vout = total_chunks)
@@ -981,8 +993,12 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
     }
 
     // Try to extract as manifest first
-    if let Some((filename, chunk_txids)) = extract_flac_manifest_from_tx(&tx_data) {
+    if let Some(manifest) = extract_flac_manifest_from_tx(&tx_data) {
         // Multi-chunk download
+        let filename = manifest.filename;
+        let chunk_txids = manifest.chunk_txids;
+        let track_title = manifest.title;
+        let lyrics = manifest.lyrics;
         let total_chunks = chunk_txids.len();
         let mut all_data: Vec<u8> = Vec::new();
 
@@ -1044,19 +1060,29 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
         // Create web-accessible download link
         let download_link = format!("/downloads/{}", filename);
         
-        let state = state.read().await;
-        let _ = state.db.update_job_complete_with_filename(
-            &job_id,
-            &txid,
-            Some(&download_link),
-            &filename,
-        );
+        {
+            let state = state.read().await;
+            let _ = state.db.update_job_complete_with_filename(
+                &job_id,
+                &txid,
+                Some(&download_link),
+                &filename,
+            );
+            // Update metadata (title and lyrics) from manifest
+            let _ = state.db.update_job_metadata(
+                &job_id,
+                track_title.as_deref(),
+                None,
+                lyrics.as_deref(),
+            );
+        }
         tracing::info!(
-            "FLAC chunked download complete for job {}: {} ({} chunks, {} bytes)",
+            "FLAC chunked download complete for job {}: {} ({} chunks, {} bytes, title: {:?})",
             job_id,
             filename,
             total_chunks,
-            all_data.len()
+            all_data.len(),
+            track_title
         );
     } else if let Some((file_data, filename)) = extract_flac_from_tx(&tx_data) {
         // Single transaction download
@@ -1127,7 +1153,7 @@ fn extract_op_return_from_tx(tx_hex: &str) -> Option<(Vec<u8>, String)> {
     None
 }
 
-fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<(String, Vec<String>)> {
+fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<ManifestMetadata> {
     let tx_bytes = hex::decode(tx_hex).ok()?;
     
     let mut i = 0;
@@ -1157,8 +1183,8 @@ fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<(String, Vec<String>)> 
         i += script_len as usize;
         
         if script.len() > 2 && script[0] == 0x00 && script[1] == 0x63 {
-            if let Some((filename, chunk_txids)) = parse_flac_manifest_script(&script[2..]) {
-                return Some((filename, chunk_txids));
+            if let Some(manifest) = parse_flac_manifest_script(&script[2..]) {
+                return Some(manifest);
             }
         }
     }
@@ -1166,7 +1192,16 @@ fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<(String, Vec<String>)> 
     None
 }
 
-fn parse_flac_manifest_script(script: &[u8]) -> Option<(String, Vec<String>)> {
+/// Manifest metadata structure
+#[derive(Debug, Clone)]
+struct ManifestMetadata {
+    filename: String,
+    chunk_txids: Vec<String>,
+    title: Option<String>,
+    lyrics: Option<String>,
+}
+
+fn parse_flac_manifest_script(script: &[u8]) -> Option<ManifestMetadata> {
     let mut i = 0;
     let mut push_data_items: Vec<Vec<u8>> = Vec::new();
     
@@ -1191,6 +1226,16 @@ fn parse_flac_manifest_script(script: &[u8]) -> Option<(String, Vec<String>)> {
     
     let filename = String::from_utf8_lossy(&push_data_items[1]).to_string();
     
+    // Parse metadata JSON to extract title and lyrics
+    let metadata_str = String::from_utf8_lossy(&push_data_items[2]);
+    let (title, lyrics) = if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&metadata_str) {
+        let title = metadata["title"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let lyrics = metadata["lyrics"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        (title, lyrics)
+    } else {
+        (None, None)
+    };
+    
     let chunk_txids: Vec<String> = push_data_items[3..]
         .iter()
         .map(|data| String::from_utf8_lossy(data).to_string())
@@ -1200,7 +1245,12 @@ fn parse_flac_manifest_script(script: &[u8]) -> Option<(String, Vec<String>)> {
         return None;
     }
     
-    Some((filename, chunk_txids))
+    Some(ManifestMetadata {
+        filename,
+        chunk_txids,
+        title,
+        lyrics,
+    })
 }
 
 fn extract_flac_chunk_from_tx(tx_hex: &str) -> Option<Vec<u8>> {

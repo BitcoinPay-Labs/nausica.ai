@@ -50,6 +50,26 @@ impl Database {
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN lyrics TEXT", []);
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN network TEXT", []);
 
+        // Create admin_config table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS admin_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                admin_pay_mainnet INTEGER NOT NULL DEFAULT 0,
+                admin_pay_testnet INTEGER NOT NULL DEFAULT 0,
+                mainnet_wif TEXT,
+                testnet_wif TEXT,
+                updated_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+
+        // Insert default config if not exists
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO admin_config (id, admin_pay_mainnet, admin_pay_testnet, updated_at) 
+             VALUES (1, 0, 0, ?1)",
+            params![Utc::now().to_rfc3339()],
+        );
+
         Ok(Database {
             conn: Mutex::new(conn),
         })
@@ -290,4 +310,50 @@ impl Database {
         )?;
         Ok(())
     }
+
+    // Admin config methods
+    pub fn get_admin_config(&self) -> Result<AdminConfig> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT admin_pay_mainnet, admin_pay_testnet, mainnet_wif, testnet_wif, updated_at
+             FROM admin_config WHERE id = 1",
+        )?;
+
+        let mut rows = stmt.query([])?;
+
+        if let Some(row) = rows.next()? {
+            Ok(AdminConfig {
+                admin_pay_mainnet: row.get::<_, i32>(0)? != 0,
+                admin_pay_testnet: row.get::<_, i32>(1)? != 0,
+                mainnet_wif: row.get(2).ok(),
+                testnet_wif: row.get(3).ok(),
+            })
+        } else {
+            Ok(AdminConfig::default())
+        }
+    }
+
+    pub fn update_admin_config(&self, config: &AdminConfig) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE admin_config SET admin_pay_mainnet = ?1, admin_pay_testnet = ?2, 
+             mainnet_wif = ?3, testnet_wif = ?4, updated_at = ?5 WHERE id = 1",
+            params![
+                config.admin_pay_mainnet as i32,
+                config.admin_pay_testnet as i32,
+                config.mainnet_wif,
+                config.testnet_wif,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AdminConfig {
+    pub admin_pay_mainnet: bool,
+    pub admin_pay_testnet: bool,
+    pub mainnet_wif: Option<String>,
+    pub testnet_wif: Option<String>,
 }

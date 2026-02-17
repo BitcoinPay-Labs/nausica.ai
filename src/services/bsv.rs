@@ -554,6 +554,8 @@ impl BsvService {
         filename: &str,
         file_size: usize,
         chunk_txids: &[String],
+        track_title: Option<&str>,
+        lyrics: Option<&str>,
     ) -> Vec<u8> {
         let mut script = Vec::new();
 
@@ -567,12 +569,14 @@ impl BsvService {
         // Filename
         Self::push_data(&mut script, filename.as_bytes());
 
-        // Metadata JSON
+        // Metadata JSON (includes title and lyrics)
         let metadata = serde_json::json!({
             "size": file_size,
             "chunks": chunk_txids.len(),
-            "version": "1.0",
-            "mime": "audio/flac"
+            "version": "1.1",
+            "mime": "audio/flac",
+            "title": track_title.unwrap_or(""),
+            "lyrics": lyrics.unwrap_or("")
         }).to_string();
         Self::push_data(&mut script, metadata.as_bytes());
 
