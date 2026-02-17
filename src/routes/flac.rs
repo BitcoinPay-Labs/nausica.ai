@@ -178,6 +178,7 @@ pub async fn prepare_flac_upload(
         track_title,
         cover_txid: None, // Will be set after cover image is uploaded to BSV
         lyrics,
+        network: Some(network),
     };
 
     {
@@ -261,6 +262,7 @@ pub async fn start_flac_download(
         track_title: None,
         cover_txid: None,
         lyrics: None,
+        network: None,
     };
 
     {

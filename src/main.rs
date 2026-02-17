@@ -120,10 +120,15 @@ async fn payment_watcher(state: Arc<RwLock<AppState>>) {
             let job_id = job.id.clone();
             let address = job.payment_address.clone().unwrap_or_default();
             let job_type = job.job_type.clone();
+            let network = job.network.clone().unwrap_or_else(|| "mainnet".to_string());
             
             tokio::spawn(async move {
-                // Check for payment
-                let has_payment = {
+                // Check for payment based on network
+                let has_payment = if network == "testnet" {
+                    // Use WhatsOnChain API for testnet
+                    check_testnet_payment(&address).await
+                } else {
+                    // Use Bitails API for mainnet
                     let state = state_clone.read().await;
                     match state.bitails.get_address_unspent(&address).await {
                         Ok(utxos) => !utxos.is_empty(),
@@ -138,7 +143,7 @@ async fn payment_watcher(state: Arc<RwLock<AppState>>) {
                     drop(state);
 
                     // Process the job
-                    process_job(state_clone, job_id, job_type, address).await;
+                    process_job(state_clone, job_id, job_type, address, network).await;
                 }
             });
         }
@@ -147,8 +152,95 @@ async fn payment_watcher(state: Arc<RwLock<AppState>>) {
     }
 }
 
+/// Check for payment on testnet using WhatsOnChain API
+async fn check_testnet_payment(address: &str) -> bool {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.whatsonchain.com/v1/bsv/test/address/{}/unspent", address);
+    
+    match client.get(&url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<Vec<serde_json::Value>>().await {
+                    Ok(utxos) => !utxos.is_empty(),
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// Get testnet UTXOs for upload using WhatsOnChain API
+async fn get_testnet_utxos_for_upload(address: &str) -> Result<Vec<crate::services::bitails::Utxo>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.whatsonchain.com/v1/bsv/test/address/{}/unspent", address);
+    
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
+    }
+    
+    let json: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    let utxos: Vec<crate::services::bitails::Utxo> = json
+        .iter()
+        .filter_map(|v| {
+            let txid = v.get("tx_hash")?.as_str()?.to_string();
+            let vout = v.get("tx_pos")?.as_u64()? as u32;
+            let satoshis = v.get("value")?.as_i64()?;
+            Some(crate::services::bitails::Utxo { 
+                txid, 
+                vout, 
+                satoshis,
+                script_pubkey: String::new(),
+                blockheight: None,
+                confirmations: None,
+            })
+        })
+        .collect();
+    
+    Ok(utxos)
+}
+
+/// Broadcast transaction to testnet using WhatsOnChain API
+async fn broadcast_testnet_tx(raw_tx: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.whatsonchain.com/v1/bsv/test/tx/raw";
+    
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "txhex": raw_tx }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Broadcast failed: {}", error_text));
+    }
+    
+    let txid = response
+        .text()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    // Remove quotes if present
+    Ok(txid.trim_matches('"').to_string())
+}
+
 /// Process a job based on its type
-async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: JobType, address: String) {
+async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: JobType, address: String, network: String) {
     use crate::models::job::JobStatus;
     use tokio::time::{sleep, Duration};
 
@@ -172,6 +264,7 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
                 address,
                 job.file_data,
                 job.filename,
+                network,
             ).await;
         }
         JobType::FlacUpload => {
@@ -182,6 +275,7 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
                 address,
                 job.file_data,
                 job.filename,
+                network,
             ).await;
         }
         JobType::Download => {
@@ -201,6 +295,7 @@ async fn process_upload(
     address: String,
     file_data: Option<Vec<u8>>,
     filename: Option<String>,
+    _network: String,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -341,6 +436,7 @@ async fn process_flac_upload(
     address: String,
     file_data: Option<Vec<u8>>,
     filename: Option<String>,
+    network: String,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -371,18 +467,28 @@ async fn process_flac_upload(
         let _ = state.db.update_job_progress(&job_id, 5.0, "Fetching UTXOs...");
     }
 
-    // Get UTXOs
-    let utxos = {
-        let state = state.read().await;
-        state.bitails.get_address_unspent(&address).await
-    };
-
-    let mut utxos = match utxos {
-        Ok(u) => u,
-        Err(e) => {
+    // Get UTXOs based on network
+    let mut utxos: Vec<Utxo> = if network == "testnet" {
+        match get_testnet_utxos_for_upload(&address).await {
+            Ok(u) => u,
+            Err(e) => {
+                let state = state.read().await;
+                let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
+                return;
+            }
+        }
+    } else {
+        let result = {
             let state = state.read().await;
-            let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
-            return;
+            state.bitails.get_address_unspent(&address).await
+        };
+        match result {
+            Ok(u) => u,
+            Err(e) => {
+                let state = state.read().await;
+                let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
+                return;
+            }
         }
     };
 
@@ -467,7 +573,9 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 8.0, "Broadcasting UTXO split transaction...");
         }
 
-        let split_txid = {
+        let split_txid = if network == "testnet" {
+            broadcast_testnet_tx(&split_tx).await
+        } else {
             let state = state.read().await;
             state.bitails.broadcast_transaction(&split_tx).await
         };
@@ -564,7 +672,9 @@ async fn process_flac_upload(
                     sleep(delay).await;
                 }
                 
-                let broadcast_result = {
+                let broadcast_result = if network == "testnet" {
+                    broadcast_testnet_tx(&raw_tx).await
+                } else {
                     let state = state.read().await;
                     state.bitails.broadcast_transaction(&raw_tx).await
                 };
@@ -636,7 +746,9 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 95.0, "Broadcasting manifest...");
         }
 
-        let broadcast_result = {
+        let broadcast_result = if network == "testnet" {
+            broadcast_testnet_tx(&raw_tx).await
+        } else {
             let state = state.read().await;
             state.bitails.broadcast_transaction(&raw_tx).await
         };
@@ -728,7 +840,9 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 60.0, "Broadcasting FLAC transaction...");
         }
 
-        let broadcast_result = {
+        let broadcast_result = if network == "testnet" {
+            broadcast_testnet_tx(&raw_tx).await
+        } else {
             let state = state.read().await;
             state.bitails.broadcast_transaction(&raw_tx).await
         };

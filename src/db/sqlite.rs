@@ -38,7 +38,8 @@ impl Database {
                 updated_at TEXT NOT NULL,
                 track_title TEXT,
                 cover_txid TEXT,
-                lyrics TEXT
+                lyrics TEXT,
+                network TEXT
             )",
             [],
         )?;
@@ -47,6 +48,7 @@ impl Database {
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN track_title TEXT", []);
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN cover_txid TEXT", []);
         let _ = conn.execute("ALTER TABLE jobs ADD COLUMN lyrics TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN network TEXT", []);
 
         Ok(Database {
             conn: Mutex::new(conn),
@@ -60,8 +62,8 @@ impl Database {
                 id, job_type, status, filename, file_size, file_data,
                 payment_address, payment_wif, required_satoshis,
                 manifest_txid, download_link, message, progress,
-                created_at, updated_at, track_title, cover_txid, lyrics
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                created_at, updated_at, track_title, cover_txid, lyrics, network
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 job.id,
                 job.job_type.as_str(),
@@ -81,6 +83,7 @@ impl Database {
                 job.track_title,
                 job.cover_txid,
                 job.lyrics,
+                job.network,
             ],
         )?;
         Ok(())
@@ -92,7 +95,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at, track_title, cover_txid, lyrics
+                    created_at, updated_at, track_title, cover_txid, lyrics, network
              FROM jobs WHERE id = ?1",
         )?;
 
@@ -111,7 +114,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at, track_title, cover_txid, lyrics
+                    created_at, updated_at, track_title, cover_txid, lyrics, network
              FROM jobs WHERE status = 'processing'",
         )?;
 
@@ -131,7 +134,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at, track_title, cover_txid, lyrics
+                    created_at, updated_at, track_title, cover_txid, lyrics, network
              FROM jobs WHERE status = 'pending_payment'",
         )?;
 
@@ -269,6 +272,7 @@ impl Database {
             track_title: row.get(15).ok(),
             cover_txid: row.get(16).ok(),
             lyrics: row.get(17).ok(),
+            network: row.get(18).ok(),
         })
     }
 

@@ -82,6 +82,8 @@ pub struct Job {
     pub track_title: Option<String>,
     pub cover_txid: Option<String>,
     pub lyrics: Option<String>,
+    // Network (mainnet or testnet)
+    pub network: Option<String>,
 }
 
 impl Job {
@@ -114,6 +116,7 @@ impl Job {
             track_title: None,
             cover_txid: None,
             lyrics: None,
+            network: None,
         }
     }
 
@@ -146,6 +149,7 @@ impl Job {
             track_title: None,
             cover_txid: None,
             lyrics: None,
+            network: None,
         }
     }
 
@@ -170,6 +174,7 @@ impl Job {
             track_title: None,
             cover_txid: None,
             lyrics: None,
+            network: None,
         }
     }
 
@@ -194,6 +199,7 @@ impl Job {
             track_title: None,
             cover_txid: None,
             lyrics: None,
+            network: None,
         }
     }
 }

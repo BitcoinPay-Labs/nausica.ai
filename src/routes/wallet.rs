@@ -207,15 +207,32 @@ pub async fn send_bsv(
     
     let state_guard = state.read().await;
     
-    // Get UTXOs
-    let utxos = match state_guard.bitails.get_address_unspent(&sender_address).await {
-        Ok(u) => u,
-        Err(e) => {
-            return Json(SendResponse {
-                success: false,
-                txid: None,
-                error: Some(format!("Failed to get UTXOs: {}", e)),
-            });
+    // Get UTXOs based on network
+    let utxos = if network == "testnet" {
+        match get_testnet_utxos(&sender_address).await {
+            Ok(u) => u,
+            Err(e) => {
+                return Json(SendResponse {
+                    success: false,
+                    txid: None,
+                    error: Some(format!("Failed to get UTXOs: {}", e)),
+                });
+            }
+        }
+    } else {
+        match state_guard.bitails.get_address_unspent(&sender_address).await {
+            Ok(u) => u.iter().map(|utxo| TestnetUtxo {
+                txid: utxo.txid.clone(),
+                vout: utxo.vout,
+                satoshis: utxo.satoshis,
+            }).collect(),
+            Err(e) => {
+                return Json(SendResponse {
+                    success: false,
+                    txid: None,
+                    error: Some(format!("Failed to get UTXOs: {}", e)),
+                });
+            }
         }
     };
     
@@ -302,17 +319,99 @@ pub async fn send_bsv(
         }
     };
     
-    // Broadcast transaction
-    match state_guard.bitails.broadcast_transaction(&raw_tx).await {
-        Ok(txid) => Json(SendResponse {
-            success: true,
-            txid: Some(txid),
-            error: None,
-        }),
-        Err(e) => Json(SendResponse {
-            success: false,
-            txid: None,
-            error: Some(format!("Failed to broadcast: {}", e)),
-        }),
+    // Broadcast transaction based on network
+    if network == "testnet" {
+        match broadcast_testnet_transaction(&raw_tx).await {
+            Ok(txid) => Json(SendResponse {
+                success: true,
+                txid: Some(txid),
+                error: None,
+            }),
+            Err(e) => Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Failed to broadcast: {}", e)),
+            }),
+        }
+    } else {
+        match state_guard.bitails.broadcast_transaction(&raw_tx).await {
+            Ok(txid) => Json(SendResponse {
+                success: true,
+                txid: Some(txid),
+                error: None,
+            }),
+            Err(e) => Json(SendResponse {
+                success: false,
+                txid: None,
+                error: Some(format!("Failed to broadcast: {}", e)),
+            }),
+        }
     }
+}
+
+#[derive(Debug)]
+struct TestnetUtxo {
+    txid: String,
+    vout: u32,
+    satoshis: i64,
+}
+
+/// Get testnet UTXOs using WhatsOnChain API
+async fn get_testnet_utxos(address: &str) -> Result<Vec<TestnetUtxo>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.whatsonchain.com/v1/bsv/test/address/{}/unspent", address);
+    
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
+    }
+    
+    let json: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    let utxos: Vec<TestnetUtxo> = json
+        .iter()
+        .filter_map(|v| {
+            let txid = v.get("tx_hash")?.as_str()?.to_string();
+            let vout = v.get("tx_pos")?.as_u64()? as u32;
+            let satoshis = v.get("value")?.as_i64()?;
+            Some(TestnetUtxo { txid, vout, satoshis })
+        })
+        .collect();
+    
+    Ok(utxos)
+}
+
+/// Broadcast transaction to testnet using WhatsOnChain API
+async fn broadcast_testnet_transaction(raw_tx: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.whatsonchain.com/v1/bsv/test/tx/raw";
+    
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "txhex": raw_tx }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Broadcast failed: {}", error_text));
+    }
+    
+    let txid = response
+        .text()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    // Remove quotes if present
+    Ok(txid.trim_matches('"').to_string())
 }
