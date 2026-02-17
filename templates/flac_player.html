@@ -440,23 +440,9 @@
             color: #666;
         }
 
-        .lyrics-line-text {
-            position: relative;
-            display: inline;
-        }
-
-        .lyrics-line-fill {
-            position: absolute;
-            top: 0;
-            left: 0;
+        .lyrics-line.active {
+            background: rgba(0, 212, 170, 0.15);
             color: #00d4aa;
-            overflow: hidden;
-            white-space: nowrap;
-            width: 0%;
-            transition: width 0.1s linear;
-        }
-
-        .lyrics-line.active .lyrics-line-fill {
             font-weight: 500;
         }
 
@@ -802,10 +788,7 @@
                 const lineDiv = document.createElement('div');
                 lineDiv.className = 'lyrics-line';
                 lineDiv.dataset.index = index;
-                lineDiv.innerHTML = `
-                    <span class="lyrics-line-text">${escapeHtml(lyric.text)}</span>
-                    <span class="lyrics-line-fill">${escapeHtml(lyric.text)}</span>
-                `;
+                lineDiv.textContent = lyric.text;
                 container.appendChild(lineDiv);
             });
         }
@@ -831,36 +814,15 @@
                 const lines = document.querySelectorAll('.lyrics-line');
                 lines.forEach((line, index) => {
                     line.classList.remove('active', 'past');
-                    const fill = line.querySelector('.lyrics-line-fill');
-                    if (fill) fill.style.width = '0%';
                     
                     if (index < currentLyricIndex) {
                         line.classList.add('past');
-                        if (fill) fill.style.width = '100%';
                     } else if (index === currentLyricIndex) {
                         line.classList.add('active');
                         // Scroll to current line
                         line.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                 });
-            }
-            
-            // Update fill progress for current line
-            if (currentLyricIndex >= 0 && currentLyricIndex < parsedLyrics.length) {
-                const currentLine = document.querySelector(`.lyrics-line[data-index="${currentLyricIndex}"]`);
-                if (currentLine) {
-                    const fill = currentLine.querySelector('.lyrics-line-fill');
-                    if (fill) {
-                        const startTime = parsedLyrics[currentLyricIndex].time;
-                        const endTime = currentLyricIndex < parsedLyrics.length - 1 
-                            ? parsedLyrics[currentLyricIndex + 1].time 
-                            : startTime + 5; // Default 5 seconds for last line
-                        const duration = endTime - startTime;
-                        const elapsed = currentTime - startTime;
-                        const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100));
-                        fill.style.width = progress + '%';
-                    }
-                }
             }
         }
 

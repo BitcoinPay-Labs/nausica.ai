@@ -520,10 +520,9 @@
                     // Read LRC file and populate lyrics textarea
                     const reader = new FileReader();
                     reader.onload = (e) => {
-                        // Parse LRC format - remove timestamps for display
+                        // Keep LRC format with timestamps for karaoke functionality
                         const lrcContent = e.target.result;
-                        const plainLyrics = lrcContent.replace(/\[\d{2}:\d{2}\.\d{2}\]/g, '').trim();
-                        document.getElementById('lyricsInput').value = plainLyrics;
+                        document.getElementById('lyricsInput').value = lrcContent.trim();
                     };
                     reader.readAsText(file);
                 }

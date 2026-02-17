@@ -306,13 +306,22 @@ impl Database {
         &self,
         id: &str,
         track_title: Option<&str>,
-        cover_txid: Option<&str>,
+        artist_name: Option<&str>,
         lyrics: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE jobs SET track_title = ?1, cover_txid = ?2, lyrics = ?3, updated_at = ?4 WHERE id = ?5",
-            params![track_title, cover_txid, lyrics, Utc::now().to_rfc3339(), id],
+            "UPDATE jobs SET track_title = ?1, artist_name = ?2, lyrics = ?3, updated_at = ?4 WHERE id = ?5",
+            params![track_title, artist_name, lyrics, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_job_cover_txid(&self, id: &str, cover_txid: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET cover_txid = ?1, updated_at = ?2 WHERE id = ?3",
+            params![cover_txid, Utc::now().to_rfc3339(), id],
         )?;
         Ok(())
     }

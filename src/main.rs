@@ -1005,7 +1005,9 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
         let filename = manifest.filename;
         let chunk_txids = manifest.chunk_txids;
         let track_title = manifest.title;
+        let artist_name = manifest.artist;
         let lyrics = manifest.lyrics;
+        let cover_txid = manifest.cover_txid;
         let total_chunks = chunk_txids.len();
         let mut all_data: Vec<u8> = Vec::new();
 
@@ -1075,13 +1077,17 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
                 Some(&download_link),
                 &filename,
             );
-            // Update metadata (title and lyrics) from manifest
+            // Update metadata (title, artist, lyrics, cover_txid) from manifest
             let _ = state.db.update_job_metadata(
                 &job_id,
                 track_title.as_deref(),
-                None,
+                artist_name.as_deref(),
                 lyrics.as_deref(),
             );
+            // Update cover_txid if available
+            if let Some(ref cover) = cover_txid {
+                let _ = state.db.update_job_cover_txid(&job_id, cover);
+            }
         }
         tracing::info!(
             "FLAC chunked download complete for job {}: {} ({} chunks, {} bytes, title: {:?})",
