@@ -788,8 +788,7 @@
             return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
 
-        // Check for TXID in URL
-        const urlParams = new URLSearchParams(window.location.search);
+        // Check for TXID in URL and auto-load
         const txidParam = urlParams.get('txid');
         if (txidParam && txidParam.length === 64) {
             txidInput.value = txidParam;
