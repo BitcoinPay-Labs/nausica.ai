@@ -235,8 +235,8 @@ async fn broadcast_testnet_tx(raw_tx: &str) -> Result<String, String> {
         .await
         .map_err(|e| format!("Parse error: {}", e))?;
     
-    // Remove quotes if present
-    Ok(txid.trim_matches('"').to_string())
+    // Remove quotes, whitespace, and newlines
+    Ok(txid.trim().trim_matches('"').trim().to_string())
 }
 
 /// Process a job based on its type
