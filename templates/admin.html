@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - NAUSICA</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .admin-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .admin-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .admin-header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 10px;
+        }
+
+        /* Login Section */
+        .login-section {
+            max-width: 400px;
+            margin: 100px auto;
+            padding: 40px;
+            background: #1a1a2e;
+            border-radius: 16px;
+            text-align: center;
+        }
+
+        .login-section h2 {
+            margin-bottom: 20px;
+            color: #00d4aa;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 14px 16px;
+            background: #0d0d1a;
+            border: 1px solid #333;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 15px;
+        }
+
+        .login-input:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+
+        .login-btn {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #00d4aa, #00a080);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .login-error {
+            color: #ff6464;
+            margin-top: 15px;
+            display: none;
+        }
+
+        /* Admin Panel */
+        .admin-panel {
+            display: none;
+        }
+
+        .admin-panel.visible {
+            display: block;
+        }
+
+        .panel-section {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .panel-section h3 {
+            color: #00d4aa;
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 10px;
+        }
+
+        /* Network Tabs */
+        .network-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .network-tab {
+            flex: 1;
+            padding: 12px 20px;
+            background: #0d0d1a;
+            border: 1px solid #333;
+            border-radius: 10px;
+            color: #888;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s ease;
+        }
+
+        .network-tab:hover {
+            border-color: #00d4aa;
+            color: #fff;
+        }
+
+        .network-tab.active {
+            background: rgba(0, 212, 170, 0.1);
+            border-color: #00d4aa;
+            color: #00d4aa;
+        }
+
+        /* Toggle Switch */
+        .toggle-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .toggle-row:last-child {
+            border-bottom: none;
+        }
+
+        .toggle-label {
+            font-size: 1rem;
+        }
+
+        .toggle-description {
+            color: #888;
+            font-size: 0.85rem;
+            margin-top: 5px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #333;
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #fff;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: #00d4aa;
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        /* Wallet Info */
+        .wallet-info {
+            background: #0d0d1a;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 15px;
+        }
+
+        .wallet-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+        }
+
+        .wallet-row:not(:last-child) {
+            border-bottom: 1px solid #333;
+        }
+
+        .wallet-label {
+            color: #888;
+        }
+
+        .wallet-value {
+            font-family: monospace;
+            color: #fff;
+            word-break: break-all;
+            text-align: right;
+            max-width: 60%;
+        }
+
+        .wallet-value.balance {
+            color: #00d4aa;
+            font-size: 1.1rem;
+        }
+
+        /* WIF Input */
+        .wif-input-group {
+            margin-top: 15px;
+        }
+
+        .wif-input-group label {
+            display: block;
+            color: #888;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+        }
+
+        .wif-input {
+            width: 100%;
+            padding: 12px 14px;
+            background: #0d0d1a;
+            border: 1px solid #333;
+            border-radius: 10px;
+            color: #fff;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .wif-input:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+
+        /* Save Button */
+        .save-btn {
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #00d4aa, #00a080);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+
+        .save-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0, 212, 170, 0.3);
+        }
+
+        .save-btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Status Message */
+        .status-message {
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .status-message.success {
+            display: block;
+            background: rgba(0, 212, 170, 0.1);
+            color: #00d4aa;
+        }
+
+        .status-message.error {
+            display: block;
+            background: rgba(255, 100, 100, 0.1);
+            color: #ff6464;
+        }
+
+        /* Logout Button */
+        .logout-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background: transparent;
+            border: 1px solid #444;
+            border-radius: 8px;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .logout-btn:hover {
+            border-color: #ff6464;
+            color: #ff6464;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .admin-container {
+                padding: 15px;
+            }
+
+            .wallet-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+
+            .wallet-value {
+                max-width: 100%;
+                text-align: left;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <!-- Login Section -->
+        <div class="login-section" id="loginSection">
+            <h2>Admin Login</h2>
+            <input type="password" class="login-input" id="adminKeyInput" placeholder="Enter Admin Key">
+            <button class="login-btn" id="loginBtn">Login</button>
+            <div class="login-error" id="loginError">Invalid admin key</div>
+        </div>
+
+        <!-- Admin Panel -->
+        <div class="admin-panel" id="adminPanel">
+            <button class="logout-btn" id="logoutBtn">Logout</button>
+            
+            <div class="admin-header">
+                <h1>Admin Panel</h1>
+            </div>
+
+            <!-- Network Selection -->
+            <div class="network-tabs">
+                <div class="network-tab active" data-network="mainnet">Mainnet</div>
+                <div class="network-tab" data-network="testnet">Testnet</div>
+            </div>
+
+            <!-- Admin Pay Settings -->
+            <div class="panel-section">
+                <h3>Admin Pay Settings</h3>
+                
+                <div class="toggle-row">
+                    <div>
+                        <div class="toggle-label">Admin Pay</div>
+                        <div class="toggle-description">When enabled, admin wallet pays for all uploads on this network</div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="adminPayToggle">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Wallet Management -->
+            <div class="panel-section">
+                <h3>Management Wallet</h3>
+                
+                <div class="wallet-info" id="walletInfo">
+                    <div class="wallet-row">
+                        <span class="wallet-label">Address</span>
+                        <span class="wallet-value" id="walletAddress">Not configured</span>
+                    </div>
+                    <div class="wallet-row">
+                        <span class="wallet-label">Balance</span>
+                        <span class="wallet-value balance" id="walletBalance">-</span>
+                    </div>
+                </div>
+
+                <div class="wif-input-group">
+                    <label>Wallet WIF (Private Key)</label>
+                    <input type="password" class="wif-input" id="wifInput" placeholder="Enter WIF to set/update wallet">
+                </div>
+
+                <button class="save-btn" id="saveBtn">Save Settings</button>
+                <div class="status-message" id="statusMessage"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let adminKey = '';
+        let currentNetwork = 'mainnet';
+        let config = {
+            admin_pay_mainnet: false,
+            admin_pay_testnet: false,
+            mainnet_address: null,
+            testnet_address: null
+        };
+
+        // DOM Elements
+        const loginSection = document.getElementById('loginSection');
+        const adminPanel = document.getElementById('adminPanel');
+        const adminKeyInput = document.getElementById('adminKeyInput');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginError = document.getElementById('loginError');
+        const logoutBtn = document.getElementById('logoutBtn');
+        const networkTabs = document.querySelectorAll('.network-tab');
+        const adminPayToggle = document.getElementById('adminPayToggle');
+        const walletAddress = document.getElementById('walletAddress');
+        const walletBalance = document.getElementById('walletBalance');
+        const wifInput = document.getElementById('wifInput');
+        const saveBtn = document.getElementById('saveBtn');
+        const statusMessage = document.getElementById('statusMessage');
+
+        // Login
+        loginBtn.addEventListener('click', login);
+        adminKeyInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') login();
+        });
+
+        async function login() {
+            const key = adminKeyInput.value.trim();
+            if (!key) return;
+
+            try {
+                const response = await fetch('/api/admin/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    adminKey = key;
+                    loginSection.style.display = 'none';
+                    adminPanel.classList.add('visible');
+                    loginError.style.display = 'none';
+                    loadConfig();
+                } else {
+                    loginError.style.display = 'block';
+                }
+            } catch (error) {
+                loginError.textContent = 'Network error';
+                loginError.style.display = 'block';
+            }
+        }
+
+        // Logout
+        logoutBtn.addEventListener('click', () => {
+            adminKey = '';
+            adminPanel.classList.remove('visible');
+            loginSection.style.display = 'block';
+            adminKeyInput.value = '';
+        });
+
+        // Network Tabs
+        networkTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                networkTabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentNetwork = tab.dataset.network;
+                updateUI();
+                loadWalletBalance();
+            });
+        });
+
+        // Load Config
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/admin/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: adminKey })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    config = {
+                        admin_pay_mainnet: data.admin_pay_mainnet,
+                        admin_pay_testnet: data.admin_pay_testnet,
+                        mainnet_address: data.mainnet_address,
+                        testnet_address: data.testnet_address
+                    };
+                    updateUI();
+                    loadWalletBalance();
+                }
+            } catch (error) {
+                console.error('Failed to load config:', error);
+            }
+        }
+
+        // Load Wallet Balance
+        async function loadWalletBalance() {
+            try {
+                const response = await fetch('/api/admin/wallet/balance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: adminKey, network: currentNetwork })
+                });
+
+                const data = await response.json();
+
+                if (data.success && data.balance !== null) {
+                    walletBalance.textContent = (data.balance / 100000000).toFixed(8) + ' BSV';
+                } else {
+                    walletBalance.textContent = '-';
+                }
+            } catch (error) {
+                walletBalance.textContent = 'Error';
+            }
+        }
+
+        // Update UI based on current network
+        function updateUI() {
+            if (currentNetwork === 'mainnet') {
+                adminPayToggle.checked = config.admin_pay_mainnet;
+                walletAddress.textContent = config.mainnet_address || 'Not configured';
+            } else {
+                adminPayToggle.checked = config.admin_pay_testnet;
+                walletAddress.textContent = config.testnet_address || 'Not configured';
+            }
+            wifInput.value = '';
+        }
+
+        // Save Settings
+        saveBtn.addEventListener('click', saveSettings);
+
+        async function saveSettings() {
+            saveBtn.disabled = true;
+            statusMessage.className = 'status-message';
+            statusMessage.style.display = 'none';
+
+            const updateData = {
+                key: adminKey
+            };
+
+            // Update admin pay setting for current network
+            if (currentNetwork === 'mainnet') {
+                updateData.admin_pay_mainnet = adminPayToggle.checked;
+            } else {
+                updateData.admin_pay_testnet = adminPayToggle.checked;
+            }
+
+            // Update WIF if provided
+            const wif = wifInput.value.trim();
+            if (wif) {
+                if (currentNetwork === 'mainnet') {
+                    updateData.mainnet_wif = wif;
+                } else {
+                    updateData.testnet_wif = wif;
+                }
+            }
+
+            try {
+                const response = await fetch('/api/admin/config/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updateData)
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    statusMessage.textContent = 'Settings saved successfully';
+                    statusMessage.className = 'status-message success';
+                    // Reload config to get updated addresses
+                    await loadConfig();
+                } else {
+                    statusMessage.textContent = data.error || 'Failed to save settings';
+                    statusMessage.className = 'status-message error';
+                }
+            } catch (error) {
+                statusMessage.textContent = 'Network error';
+                statusMessage.className = 'status-message error';
+            }
+
+            saveBtn.disabled = false;
+        }
+
+        // Toggle change handler
+        adminPayToggle.addEventListener('change', () => {
+            if (currentNetwork === 'mainnet') {
+                config.admin_pay_mainnet = adminPayToggle.checked;
+            } else {
+                config.admin_pay_testnet = adminPayToggle.checked;
+            }
+        });
+    </script>
+</body>
+</html>

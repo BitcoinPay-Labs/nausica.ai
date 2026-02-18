@@ -78,6 +78,14 @@ pub struct Job {
     pub progress: f64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    // Track metadata
+    pub track_title: Option<String>,
+    pub artist_name: Option<String>,
+    pub cover_txid: Option<String>,
+    pub cover_data: Option<Vec<u8>>,
+    pub lyrics: Option<String>,
+    // Network (mainnet or testnet)
+    pub network: Option<String>,
 }
 
 impl Job {
@@ -107,6 +115,12 @@ impl Job {
             progress: 0.0,
             created_at: now,
             updated_at: now,
+            track_title: None,
+            artist_name: None,
+            cover_txid: None,
+            cover_data: None,
+            lyrics: None,
+            network: None,
         }
     }
 
@@ -136,6 +150,12 @@ impl Job {
             progress: 0.0,
             created_at: now,
             updated_at: now,
+            track_title: None,
+            artist_name: None,
+            cover_txid: None,
+            cover_data: None,
+            lyrics: None,
+            network: None,
         }
     }
 
@@ -157,6 +177,12 @@ impl Job {
             progress: 0.0,
             created_at: now,
             updated_at: now,
+            track_title: None,
+            artist_name: None,
+            cover_txid: None,
+            cover_data: None,
+            lyrics: None,
+            network: None,
         }
     }
 
@@ -178,6 +204,12 @@ impl Job {
             progress: 0.0,
             created_at: now,
             updated_at: now,
+            track_title: None,
+            artist_name: None,
+            cover_txid: None,
+            cover_data: None,
+            lyrics: None,
+            network: None,
         }
     }
 }

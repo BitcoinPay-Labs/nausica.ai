@@ -18,12 +18,13 @@ impl BsvService {
     }
 
     /// Generate a new keypair and return (WIF private key, address)
-    pub fn generate_keypair() -> (String, String) {
+    /// network: "mainnet" or "testnet"
+    pub fn generate_keypair(network: &str) -> (String, String) {
         let secp = Secp256k1::new();
         let (secret_key, public_key) = secp.generate_keypair(&mut OsRng);
 
-        let wif = Self::secret_key_to_wif(&secret_key);
-        let address = Self::public_key_to_address(&public_key);
+        let wif = Self::secret_key_to_wif(&secret_key, network);
+        let address = Self::public_key_to_address(&public_key, network);
 
         (wif, address)
     }
@@ -54,8 +55,11 @@ impl BsvService {
     }
 
     /// Convert SecretKey to WIF (compressed)
-    fn secret_key_to_wif(secret_key: &SecretKey) -> String {
-        let mut data = vec![0x80]; // Mainnet version
+    /// network: "mainnet" or "testnet"
+    fn secret_key_to_wif(secret_key: &SecretKey, network: &str) -> String {
+        // Mainnet: 0x80, Testnet: 0xef
+        let version_byte = if network == "testnet" { 0xef } else { 0x80 };
+        let mut data = vec![version_byte];
         data.extend_from_slice(&secret_key[..]);
         data.push(0x01); // Compressed flag
 
@@ -68,7 +72,8 @@ impl BsvService {
     }
 
     /// Convert public key to BSV address
-    fn public_key_to_address(public_key: &PublicKey) -> String {
+    /// network: "mainnet" or "testnet"
+    fn public_key_to_address(public_key: &PublicKey, network: &str) -> String {
         let serialized = public_key.serialize(); // Compressed
 
         // SHA256
@@ -77,8 +82,10 @@ impl BsvService {
         // RIPEMD160
         let ripemd_hash = Ripemd160::digest(&sha256_hash);
 
-        // Add version byte (0x00 for mainnet)
-        let mut address_bytes = vec![0x00];
+        // Add version byte (0x00 for mainnet, 0x6f for testnet)
+        // Testnet addresses start with 'm' or 'n'
+        let version_byte = if network == "testnet" { 0x6f } else { 0x00 };
+        let mut address_bytes = vec![version_byte];
         address_bytes.extend_from_slice(&ripemd_hash);
 
         // Checksum
@@ -90,11 +97,12 @@ impl BsvService {
     }
 
     /// Get address from WIF
-    pub fn wif_to_address(wif: &str) -> Result<String, String> {
+    /// network: "mainnet" or "testnet"
+    pub fn wif_to_address(wif: &str, network: &str) -> Result<String, String> {
         let secret_key = Self::wif_to_secret_key(wif)?;
         let secp = Secp256k1::new();
         let public_key = PublicKey::from_secret_key(&secp, &secret_key);
-        Ok(Self::public_key_to_address(&public_key))
+        Ok(Self::public_key_to_address(&public_key, network))
     }
 
     /// Calculate required satoshis for uploading data
@@ -531,6 +539,35 @@ impl BsvService {
         script
     }
 
+    /// Create cover image script for storing album art on BSV
+    /// Format:
+    ///   OP_FALSE (0x00)
+    ///   OP_IF (0x63)
+    ///     PUSHDATA "coverart"
+    ///     PUSHDATA <image_data>
+    ///   OP_ENDIF (0x68)
+    pub fn create_cover_image_script(image_data: &[u8]) -> Vec<u8> {
+        let mut script = Vec::new();
+
+        // OP_FALSE OP_IF
+        script.push(0x00); // OP_FALSE
+        script.push(0x63); // OP_IF
+
+        // Protocol identifier
+        Self::push_data(&mut script, b"coverart");
+
+        // Image data (may need to be split into chunks if large)
+        let max_chunk_size = 520; // Max push data size
+        for chunk in image_data.chunks(max_chunk_size) {
+            Self::push_data(&mut script, chunk);
+        }
+
+        // OP_ENDIF
+        script.push(0x68);
+
+        script
+    }
+
     /// Create FLAC manifest script that references chunk transactions
     /// Format:
     ///   OP_FALSE (0x00)
@@ -546,6 +583,10 @@ impl BsvService {
         filename: &str,
         file_size: usize,
         chunk_txids: &[String],
+        track_title: Option<&str>,
+        artist_name: Option<&str>,
+        lyrics: Option<&str>,
+        cover_txid: Option<&str>,
     ) -> Vec<u8> {
         let mut script = Vec::new();
 
@@ -559,12 +600,16 @@ impl BsvService {
         // Filename
         Self::push_data(&mut script, filename.as_bytes());
 
-        // Metadata JSON
+        // Metadata JSON (includes title, artist, lyrics, and cover_txid)
         let metadata = serde_json::json!({
             "size": file_size,
             "chunks": chunk_txids.len(),
-            "version": "1.0",
-            "mime": "audio/flac"
+            "version": "1.2",
+            "mime": "audio/flac",
+            "title": track_title.unwrap_or(""),
+            "artist": artist_name.unwrap_or(""),
+            "lyrics": lyrics.unwrap_or(""),
+            "cover_txid": cover_txid.unwrap_or("")
         }).to_string();
         Self::push_data(&mut script, metadata.as_bytes());
 

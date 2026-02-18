@@ -6,6 +6,7 @@
     <title>ナウシカ.ai - Dashboard</title>
     <script src="https://unpkg.com/lucide@latest"></script>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/wallet.css">
     <style>
         .audio-player-mini {
             position: fixed;
@@ -59,6 +60,10 @@
                 Player
             </a>
         </div>
+        <button class="wallet-btn" id="walletBtn" onclick="openWalletModal()">
+            <i data-lucide="wallet"></i>
+            <span class="network-badge" id="networkBadge">Mainnet</span>
+        </button>
     </nav>
 
     <main class="container">
@@ -241,5 +246,103 @@
         document.getElementById('refresh-btn').addEventListener('click', loadJobs);
         loadJobs();
     </script>
+
+    <!-- Wallet Modal -->
+    <div class="wallet-modal-overlay" id="walletModalOverlay" onclick="closeWalletModal()"></div>
+    <div class="wallet-modal" id="walletModal">
+        <div class="wallet-modal-header">
+            <h2>Wallet</h2>
+            <button class="wallet-close-btn" onclick="closeWalletModal()">&times;</button>
+        </div>
+        
+        <div class="network-switcher">
+            <button class="network-option active" id="mainnetBtn" onclick="switchNetwork('mainnet')">Mainnet</button>
+            <button class="network-option" id="testnetBtn" onclick="switchNetwork('testnet')">Testnet</button>
+        </div>
+
+        <div class="wallet-content" id="walletContent">
+            <!-- Not logged in state -->
+            <div class="wallet-login" id="walletLogin">
+                <div class="wallet-tabs">
+                    <button class="wallet-tab active" onclick="showWalletTab('create')">Create</button>
+                    <button class="wallet-tab" onclick="showWalletTab('wif')">WIF</button>
+                    <button class="wallet-tab" onclick="showWalletTab('mnemonic')">Mnemonic</button>
+                </div>
+                
+                <div class="wallet-tab-content" id="createTab">
+                    <p>Generate a new BSV wallet</p>
+                    <button class="wallet-action-btn" onclick="generateWallet()">
+                        <i data-lucide="plus-circle"></i>
+                        Create New Wallet
+                    </button>
+                </div>
+                
+                <div class="wallet-tab-content hidden" id="wifTab">
+                    <p>Import using WIF (Wallet Import Format)</p>
+                    <input type="password" id="wifInput" placeholder="Enter WIF private key" class="wallet-input">
+                    <button class="wallet-action-btn" onclick="importWif()">
+                        <i data-lucide="key"></i>
+                        Import WIF
+                    </button>
+                </div>
+                
+                <div class="wallet-tab-content hidden" id="mnemonicTab">
+                    <p>Import using 12/24 word mnemonic</p>
+                    <textarea id="mnemonicInput" placeholder="Enter mnemonic phrase" class="wallet-input wallet-textarea"></textarea>
+                    <button class="wallet-action-btn" onclick="importMnemonic()">
+                        <i data-lucide="file-text"></i>
+                        Import Mnemonic
+                    </button>
+                </div>
+            </div>
+
+            <!-- Logged in state -->
+            <div class="wallet-dashboard hidden" id="walletDashboard">
+                <div class="wallet-balance-card">
+                    <div class="balance-label">Balance</div>
+                    <div class="balance-amount" id="balanceAmount">0.00000000 BSV</div>
+                    <div class="balance-sats" id="balanceSats">0 sats</div>
+                </div>
+                
+                <div class="wallet-address-card">
+                    <div class="address-label">Address</div>
+                    <div class="address-value" id="walletAddress">-</div>
+                    <button class="copy-address-btn" onclick="copyWalletAddress()">
+                        <i data-lucide="copy"></i>
+                    </button>
+                </div>
+
+                <div class="wallet-actions">
+                    <button class="wallet-action-btn" onclick="showSendForm()">
+                        <i data-lucide="send"></i>
+                        Send
+                    </button>
+                    <button class="wallet-action-btn secondary" onclick="refreshBalance()">
+                        <i data-lucide="refresh-cw"></i>
+                        Refresh
+                    </button>
+                </div>
+
+                <div class="send-form hidden" id="sendForm">
+                    <h3>Send BSV</h3>
+                    <input type="text" id="sendToAddress" placeholder="Recipient address" class="wallet-input">
+                    <input type="number" id="sendAmount" placeholder="Amount in satoshis" class="wallet-input">
+                    <div class="send-actions">
+                        <button class="wallet-action-btn" onclick="sendBsv()">Send</button>
+                        <button class="wallet-action-btn secondary" onclick="hideSendForm()">Cancel</button>
+                    </div>
+                </div>
+
+                <button class="wallet-logout-btn" onclick="logoutWallet()">
+                    <i data-lucide="log-out"></i>
+                    Logout
+                </button>
+            </div>
+        </div>
+        
+        <div class="wallet-status" id="walletStatus"></div>
+    </div>
+
+    <script src="/static/js/wallet.js"></script>
 </body>
 </html>

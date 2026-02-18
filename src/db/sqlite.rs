@@ -35,10 +35,42 @@ impl Database {
                 message TEXT NOT NULL,
                 progress REAL NOT NULL,
                 created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                track_title TEXT,
+                cover_txid TEXT,
+                lyrics TEXT,
+                network TEXT
+            )",
+            [],
+        )?;
+
+        // Add new columns if they don't exist (for migration)
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN track_title TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN artist_name TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN cover_txid TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN cover_data BLOB", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN lyrics TEXT", []);
+        let _ = conn.execute("ALTER TABLE jobs ADD COLUMN network TEXT", []);
+
+        // Create admin_config table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS admin_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                admin_pay_mainnet INTEGER NOT NULL DEFAULT 0,
+                admin_pay_testnet INTEGER NOT NULL DEFAULT 0,
+                mainnet_wif TEXT,
+                testnet_wif TEXT,
                 updated_at TEXT NOT NULL
             )",
             [],
         )?;
+
+        // Insert default config if not exists
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO admin_config (id, admin_pay_mainnet, admin_pay_testnet, updated_at) 
+             VALUES (1, 0, 0, ?1)",
+            params![Utc::now().to_rfc3339()],
+        );
 
         Ok(Database {
             conn: Mutex::new(conn),
@@ -52,8 +84,8 @@ impl Database {
                 id, job_type, status, filename, file_size, file_data,
                 payment_address, payment_wif, required_satoshis,
                 manifest_txid, download_link, message, progress,
-                created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 job.id,
                 job.job_type.as_str(),
@@ -70,6 +102,12 @@ impl Database {
                 job.progress,
                 job.created_at.to_rfc3339(),
                 job.updated_at.to_rfc3339(),
+                job.track_title,
+                job.artist_name,
+                job.cover_txid,
+                job.cover_data,
+                job.lyrics,
+                job.network,
             ],
         )?;
         Ok(())
@@ -81,7 +119,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at
+                    created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
              FROM jobs WHERE id = ?1",
         )?;
 
@@ -100,7 +138,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at
+                    created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
              FROM jobs WHERE status = 'processing'",
         )?;
 
@@ -120,7 +158,7 @@ impl Database {
             "SELECT id, job_type, status, filename, file_size, file_data,
                     payment_address, payment_wif, required_satoshis,
                     manifest_txid, download_link, message, progress,
-                    created_at, updated_at
+                    created_at, updated_at, track_title, artist_name, cover_txid, cover_data, lyrics, network
              FROM jobs WHERE status = 'pending_payment'",
         )?;
 
@@ -255,6 +293,82 @@ impl Database {
             updated_at: DateTime::parse_from_rfc3339(&updated_at_str)
                 .map(|dt| dt.with_timezone(&Utc))
                 .unwrap_or_else(|_| Utc::now()),
+            track_title: row.get(15).ok(),
+            artist_name: row.get(16).ok(),
+            cover_txid: row.get(17).ok(),
+            cover_data: row.get(18).ok(),
+            lyrics: row.get(19).ok(),
+            network: row.get(20).ok(),
         })
     }
+
+    pub fn update_job_metadata(
+        &self,
+        id: &str,
+        track_title: Option<&str>,
+        artist_name: Option<&str>,
+        lyrics: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET track_title = ?1, artist_name = ?2, lyrics = ?3, updated_at = ?4 WHERE id = ?5",
+            params![track_title, artist_name, lyrics, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_job_cover_txid(&self, id: &str, cover_txid: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE jobs SET cover_txid = ?1, updated_at = ?2 WHERE id = ?3",
+            params![cover_txid, Utc::now().to_rfc3339(), id],
+        )?;
+        Ok(())
+    }
+
+    // Admin config methods
+    pub fn get_admin_config(&self) -> Result<AdminConfig> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT admin_pay_mainnet, admin_pay_testnet, mainnet_wif, testnet_wif, updated_at
+             FROM admin_config WHERE id = 1",
+        )?;
+
+        let mut rows = stmt.query([])?;
+
+        if let Some(row) = rows.next()? {
+            Ok(AdminConfig {
+                admin_pay_mainnet: row.get::<_, i32>(0)? != 0,
+                admin_pay_testnet: row.get::<_, i32>(1)? != 0,
+                mainnet_wif: row.get(2).ok(),
+                testnet_wif: row.get(3).ok(),
+            })
+        } else {
+            Ok(AdminConfig::default())
+        }
+    }
+
+    pub fn update_admin_config(&self, config: &AdminConfig) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE admin_config SET admin_pay_mainnet = ?1, admin_pay_testnet = ?2, 
+             mainnet_wif = ?3, testnet_wif = ?4, updated_at = ?5 WHERE id = 1",
+            params![
+                config.admin_pay_mainnet as i32,
+                config.admin_pay_testnet as i32,
+                config.mainnet_wif,
+                config.testnet_wif,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AdminConfig {
+    pub admin_pay_mainnet: bool,
+    pub admin_pay_testnet: bool,
+    pub mainnet_wif: Option<String>,
+    pub testnet_wif: Option<String>,
 }

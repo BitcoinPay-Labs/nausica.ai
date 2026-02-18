@@ -79,10 +79,23 @@ async fn main() {
         .route("/start_download", post(routes::download::start_download))
         .route("/status_update/:job_id", get(routes::status::status_update))
         .route("/api/jobs", get(routes::dashboard::get_jobs))
-        // FLAC API endpoints
-        .route("/api/flac/upload", post(routes::flac::prepare_flac_upload))
-        .route("/api/flac/download", post(routes::flac::start_flac_download))
-        .route("/api/flac/status/:job_id", get(routes::flac::get_flac_status))
+                // FLAC API endpoints
+                .route("/api/flac/upload", post(routes::flac::prepare_flac_upload))
+                .route("/api/flac/download", post(routes::flac::start_flac_download))
+                .route("/api/flac/status/:job_id", get(routes::flac::get_flac_status))
+                .route("/api/flac/cover", post(routes::flac::get_cover_image))
+        // Wallet API endpoints
+        .route("/api/wallet/generate", post(routes::wallet::generate_wallet))
+        .route("/api/wallet/import", post(routes::wallet::import_wif))
+        .route("/api/wallet/balance", post(routes::wallet::get_balance))
+        .route("/api/wallet/send", post(routes::wallet::send_bsv))
+                // Admin panel
+                .route("/admin", get(routes::admin::admin_page))
+                .route("/api/admin/verify", post(routes::admin::verify_admin_key))
+                .route("/api/admin/config", post(routes::admin::get_admin_config))
+                .route("/api/admin/config/update", post(routes::admin::update_admin_config))
+                .route("/api/admin/wallet/balance", post(routes::admin::get_admin_wallet_balance))
+                .route("/api/admin/check-pay", post(routes::admin::check_admin_pay))
         // Static files and downloads
         .nest_service("/static", ServeDir::new("static"))
         .nest_service("/downloads", ServeDir::new("./data/downloads"))
@@ -115,10 +128,15 @@ async fn payment_watcher(state: Arc<RwLock<AppState>>) {
             let job_id = job.id.clone();
             let address = job.payment_address.clone().unwrap_or_default();
             let job_type = job.job_type.clone();
+            let network = job.network.clone().unwrap_or_else(|| "mainnet".to_string());
             
             tokio::spawn(async move {
-                // Check for payment
-                let has_payment = {
+                // Check for payment based on network
+                let has_payment = if network == "testnet" {
+                    // Use WhatsOnChain API for testnet
+                    check_testnet_payment(&address).await
+                } else {
+                    // Use Bitails API for mainnet
                     let state = state_clone.read().await;
                     match state.bitails.get_address_unspent(&address).await {
                         Ok(utxos) => !utxos.is_empty(),
@@ -133,7 +151,7 @@ async fn payment_watcher(state: Arc<RwLock<AppState>>) {
                     drop(state);
 
                     // Process the job
-                    process_job(state_clone, job_id, job_type, address).await;
+                    process_job(state_clone, job_id, job_type, address, network).await;
                 }
             });
         }
@@ -142,8 +160,95 @@ async fn payment_watcher(state: Arc<RwLock<AppState>>) {
     }
 }
 
+/// Check for payment on testnet using WhatsOnChain API
+async fn check_testnet_payment(address: &str) -> bool {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.whatsonchain.com/v1/bsv/test/address/{}/unspent", address);
+    
+    match client.get(&url).send().await {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<Vec<serde_json::Value>>().await {
+                    Ok(utxos) => !utxos.is_empty(),
+                    Err(_) => false,
+                }
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// Get testnet UTXOs for upload using WhatsOnChain API
+async fn get_testnet_utxos_for_upload(address: &str) -> Result<Vec<crate::services::bitails::Utxo>, String> {
+    let client = reqwest::Client::new();
+    let url = format!("https://api.whatsonchain.com/v1/bsv/test/address/{}/unspent", address);
+    
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
+    }
+    
+    let json: Vec<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    let utxos: Vec<crate::services::bitails::Utxo> = json
+        .iter()
+        .filter_map(|v| {
+            let txid = v.get("tx_hash")?.as_str()?.to_string();
+            let vout = v.get("tx_pos")?.as_u64()? as u32;
+            let satoshis = v.get("value")?.as_i64()?;
+            Some(crate::services::bitails::Utxo { 
+                txid, 
+                vout, 
+                satoshis,
+                script_pubkey: String::new(),
+                blockheight: None,
+                confirmations: None,
+            })
+        })
+        .collect();
+    
+    Ok(utxos)
+}
+
+/// Broadcast transaction to testnet using WhatsOnChain API
+async fn broadcast_testnet_tx(raw_tx: &str) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.whatsonchain.com/v1/bsv/test/tx/raw";
+    
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({ "txhex": raw_tx }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("Broadcast failed: {}", error_text));
+    }
+    
+    let txid = response
+        .text()
+        .await
+        .map_err(|e| format!("Parse error: {}", e))?;
+    
+    // Remove quotes, whitespace, and newlines
+    Ok(txid.trim().trim_matches('"').trim().to_string())
+}
+
 /// Process a job based on its type
-async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: JobType, address: String) {
+async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: JobType, address: String, network: String) {
     use crate::models::job::JobStatus;
     use tokio::time::{sleep, Duration};
 
@@ -167,6 +272,7 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
                 address,
                 job.file_data,
                 job.filename,
+                network,
             ).await;
         }
         JobType::FlacUpload => {
@@ -177,13 +283,19 @@ async fn process_job(state: Arc<RwLock<AppState>>, job_id: String, job_type: Job
                 address,
                 job.file_data,
                 job.filename,
+                network,
+                job.track_title,
+                job.artist_name,
+                job.lyrics,
+                job.cover_data,
             ).await;
         }
         JobType::Download => {
             process_download(state, job_id, job.manifest_txid).await;
         }
         JobType::FlacDownload => {
-            process_flac_download(state, job_id, job.manifest_txid).await;
+            let network = job.network.unwrap_or_else(|| "mainnet".to_string());
+            process_flac_download(state, job_id, job.manifest_txid, network).await;
         }
     }
 }
@@ -196,6 +308,7 @@ async fn process_upload(
     address: String,
     file_data: Option<Vec<u8>>,
     filename: Option<String>,
+    _network: String,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -336,6 +449,11 @@ async fn process_flac_upload(
     address: String,
     file_data: Option<Vec<u8>>,
     filename: Option<String>,
+    network: String,
+    track_title: Option<String>,
+    artist_name: Option<String>,
+    lyrics: Option<String>,
+    cover_data: Option<Vec<u8>>,
 ) {
     use crate::models::job::JobStatus;
     use crate::services::bsv::BsvService;
@@ -366,18 +484,28 @@ async fn process_flac_upload(
         let _ = state.db.update_job_progress(&job_id, 5.0, "Fetching UTXOs...");
     }
 
-    // Get UTXOs
-    let utxos = {
-        let state = state.read().await;
-        state.bitails.get_address_unspent(&address).await
-    };
-
-    let mut utxos = match utxos {
-        Ok(u) => u,
-        Err(e) => {
+    // Get UTXOs based on network
+    let mut utxos: Vec<Utxo> = if network == "testnet" {
+        match get_testnet_utxos_for_upload(&address).await {
+            Ok(u) => u,
+            Err(e) => {
+                let state = state.read().await;
+                let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
+                return;
+            }
+        }
+    } else {
+        let result = {
             let state = state.read().await;
-            let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
-            return;
+            state.bitails.get_address_unspent(&address).await
+        };
+        match result {
+            Ok(u) => u,
+            Err(e) => {
+                let state = state.read().await;
+                let _ = state.db.update_job_error(&job_id, &format!("Failed to get UTXOs: {}", e));
+                return;
+            }
         }
     };
 
@@ -395,6 +523,96 @@ async fn process_flac_upload(
             let _ = state.db.update_job_error(&job_id, &format!("Failed to create script: {}", e));
             return;
         }
+    };
+
+    // Upload cover image to BSV if present
+    let cover_txid: Option<String> = if let Some(ref cover_bytes) = cover_data {
+        {
+            let state = state.read().await;
+            let _ = state.db.update_job_progress(&job_id, 3.0, "Uploading cover image...");
+        }
+        
+        // Create cover image transaction
+        let cover_script = BsvService::create_cover_image_script(cover_bytes);
+        
+        // Use first UTXO for cover image
+        if utxos.is_empty() {
+            let state = state.read().await;
+            let _ = state.db.update_job_error(&job_id, "No UTXOs for cover image");
+            return;
+        }
+        
+        let cover_utxo = utxos.remove(0);
+        let cover_utxo_input = vec![(
+            cover_utxo.txid.clone(),
+            cover_utxo.vout,
+            cover_utxo.satoshis,
+            script_pubkey.clone(),
+        )];
+        
+        // Calculate change
+        let cover_tx_size = 150 + cover_script.len();
+        let cover_fee = {
+            let state = state.read().await;
+            (cover_tx_size as f64 * state.bsv.fee_rate).ceil() as i64
+        };
+        
+        let change_amount = cover_utxo.satoshis - cover_fee - 1;
+        let mut outputs: Vec<(Vec<u8>, i64)> = vec![(cover_script, 1)];
+        if change_amount > 546 {
+            outputs.push((script_pubkey.clone(), change_amount));
+        }
+        
+        let cover_raw_tx = {
+            let state = state.read().await;
+            state.bsv.create_transaction(&wif, &cover_utxo_input, &outputs)
+        };
+        
+        let cover_raw_tx = match cover_raw_tx {
+            Ok(tx) => tx,
+            Err(e) => {
+                tracing::warn!("Failed to create cover tx: {}", e);
+                String::new()
+            }
+        };
+        
+        if cover_raw_tx.is_empty() {
+            None
+        } else {
+            // Broadcast cover image transaction
+            let cover_broadcast_result = if network == "testnet" {
+                broadcast_testnet_tx(&cover_raw_tx).await
+            } else {
+                let state = state.read().await;
+                state.bitails.broadcast_transaction(&cover_raw_tx).await
+            };
+            
+            match cover_broadcast_result {
+                Ok(txid) => {
+                    tracing::info!("Cover image uploaded: {}", txid);
+                    // Add change output as new UTXO if we created one
+                    if change_amount > 546 {
+                        utxos.insert(0, Utxo {
+                            txid: txid.clone(),
+                            vout: 1,
+                            satoshis: change_amount,
+                            script_pubkey: String::new(),
+                            blockheight: Some(0),
+                            confirmations: Some(0),
+                        });
+                    }
+                    // Wait for propagation
+                    sleep(Duration::from_millis(1000)).await;
+                    Some(txid)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to broadcast cover image: {}", e);
+                    None
+                }
+            }
+        }
+    } else {
+        None
     };
 
     if needs_chunking {
@@ -462,7 +680,9 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 8.0, "Broadcasting UTXO split transaction...");
         }
 
-        let split_txid = {
+        let split_txid = if network == "testnet" {
+            broadcast_testnet_tx(&split_tx).await
+        } else {
             let state = state.read().await;
             state.bitails.broadcast_transaction(&split_tx).await
         };
@@ -559,7 +779,9 @@ async fn process_flac_upload(
                     sleep(delay).await;
                 }
                 
-                let broadcast_result = {
+                let broadcast_result = if network == "testnet" {
+                    broadcast_testnet_tx(&raw_tx).await
+                } else {
                     let state = state.read().await;
                     state.bitails.broadcast_transaction(&raw_tx).await
                 };
@@ -594,11 +816,15 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 85.0, "Creating manifest...");
         }
 
-        // Create manifest script
+        // Create manifest script with title, artist, lyrics, and cover
         let manifest_script = BsvService::create_flac_manifest_script(
             &filename,
             file_size,
             &chunk_txids,
+            track_title.as_deref(),
+            artist_name.as_deref(),
+            lyrics.as_deref(),
+            cover_txid.as_deref(),
         );
 
         // Use the last split UTXO for manifest (vout = total_chunks)
@@ -631,7 +857,9 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 95.0, "Broadcasting manifest...");
         }
 
-        let broadcast_result = {
+        let broadcast_result = if network == "testnet" {
+            broadcast_testnet_tx(&raw_tx).await
+        } else {
             let state = state.read().await;
             state.bitails.broadcast_transaction(&raw_tx).await
         };
@@ -723,7 +951,9 @@ async fn process_flac_upload(
             let _ = state.db.update_job_progress(&job_id, 60.0, "Broadcasting FLAC transaction...");
         }
 
-        let broadcast_result = {
+        let broadcast_result = if network == "testnet" {
+            broadcast_testnet_tx(&raw_tx).await
+        } else {
             let state = state.read().await;
             state.bitails.broadcast_transaction(&raw_tx).await
         };
@@ -808,8 +1038,26 @@ async fn process_download(state: Arc<RwLock<AppState>>, job_id: String, txid: Op
     tracing::info!("Download complete for job {}: {}", job_id, filename);
 }
 
+/// Fetch transaction data from appropriate API based on network
+async fn fetch_tx_raw(state: &Arc<RwLock<AppState>>, txid: &str, network: &str) -> Result<String, String> {
+    if network == "testnet" {
+        // Use WhatsOnChain Testnet API
+        let url = format!("https://api.whatsonchain.com/v1/bsv/test/tx/{}/hex", txid);
+        let client = reqwest::Client::new();
+        let response = client.get(&url).send().await.map_err(|e| format!("Request failed: {}", e))?;
+        if !response.status().is_success() {
+            return Err(format!("API error: {}", response.status()));
+        }
+        response.text().await.map_err(|e| format!("Parse error: {}", e))
+    } else {
+        // Use Bitails Mainnet API
+        let state = state.read().await;
+        state.bitails.download_tx_raw(txid).await
+    }
+}
+
 /// Process FLAC download
-async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txid: Option<String>) {
+async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txid: Option<String>, network: String) {
     use tokio::time::{sleep, Duration};
 
     let txid = match txid {
@@ -826,10 +1074,7 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
         let _ = state.db.update_job_progress(&job_id, 5.0, "Fetching manifest transaction...");
     }
 
-    let tx_data = {
-        let state = state.read().await;
-        state.bitails.download_tx_raw(&txid).await
-    };
+    let tx_data = fetch_tx_raw(&state, &txid, &network).await;
 
     let tx_data = match tx_data {
         Ok(data) => data,
@@ -846,8 +1091,14 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
     }
 
     // Try to extract as manifest first
-    if let Some((filename, chunk_txids)) = extract_flac_manifest_from_tx(&tx_data) {
+    if let Some(manifest) = extract_flac_manifest_from_tx(&tx_data) {
         // Multi-chunk download
+        let filename = manifest.filename;
+        let chunk_txids = manifest.chunk_txids;
+        let track_title = manifest.title;
+        let artist_name = manifest.artist;
+        let lyrics = manifest.lyrics;
+        let cover_txid = manifest.cover_txid;
         let total_chunks = chunk_txids.len();
         let mut all_data: Vec<u8> = Vec::new();
 
@@ -863,10 +1114,7 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
                 );
             }
 
-            let chunk_tx_data = {
-                let state = state.read().await;
-                state.bitails.download_tx_raw(chunk_txid).await
-            };
+            let chunk_tx_data = fetch_tx_raw(&state, chunk_txid, &network).await;
 
             let chunk_tx_data = match chunk_tx_data {
                 Ok(data) => data,
@@ -912,19 +1160,33 @@ async fn process_flac_download(state: Arc<RwLock<AppState>>, job_id: String, txi
         // Create web-accessible download link
         let download_link = format!("/downloads/{}", filename);
         
-        let state = state.read().await;
-        let _ = state.db.update_job_complete_with_filename(
-            &job_id,
-            &txid,
-            Some(&download_link),
-            &filename,
-        );
+        {
+            let state = state.read().await;
+            let _ = state.db.update_job_complete_with_filename(
+                &job_id,
+                &txid,
+                Some(&download_link),
+                &filename,
+            );
+            // Update metadata (title, artist, lyrics, cover_txid) from manifest
+            let _ = state.db.update_job_metadata(
+                &job_id,
+                track_title.as_deref(),
+                artist_name.as_deref(),
+                lyrics.as_deref(),
+            );
+            // Update cover_txid if available
+            if let Some(ref cover) = cover_txid {
+                let _ = state.db.update_job_cover_txid(&job_id, cover);
+            }
+        }
         tracing::info!(
-            "FLAC chunked download complete for job {}: {} ({} chunks, {} bytes)",
+            "FLAC chunked download complete for job {}: {} ({} chunks, {} bytes, title: {:?})",
             job_id,
             filename,
             total_chunks,
-            all_data.len()
+            all_data.len(),
+            track_title
         );
     } else if let Some((file_data, filename)) = extract_flac_from_tx(&tx_data) {
         // Single transaction download
@@ -995,7 +1257,7 @@ fn extract_op_return_from_tx(tx_hex: &str) -> Option<(Vec<u8>, String)> {
     None
 }
 
-fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<(String, Vec<String>)> {
+fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<ManifestMetadata> {
     let tx_bytes = hex::decode(tx_hex).ok()?;
     
     let mut i = 0;
@@ -1025,8 +1287,8 @@ fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<(String, Vec<String>)> 
         i += script_len as usize;
         
         if script.len() > 2 && script[0] == 0x00 && script[1] == 0x63 {
-            if let Some((filename, chunk_txids)) = parse_flac_manifest_script(&script[2..]) {
-                return Some((filename, chunk_txids));
+            if let Some(manifest) = parse_flac_manifest_script(&script[2..]) {
+                return Some(manifest);
             }
         }
     }
@@ -1034,7 +1296,18 @@ fn extract_flac_manifest_from_tx(tx_hex: &str) -> Option<(String, Vec<String>)> 
     None
 }
 
-fn parse_flac_manifest_script(script: &[u8]) -> Option<(String, Vec<String>)> {
+/// Manifest metadata structure
+#[derive(Debug, Clone)]
+struct ManifestMetadata {
+    filename: String,
+    chunk_txids: Vec<String>,
+    title: Option<String>,
+    artist: Option<String>,
+    lyrics: Option<String>,
+    cover_txid: Option<String>,
+}
+
+fn parse_flac_manifest_script(script: &[u8]) -> Option<ManifestMetadata> {
     let mut i = 0;
     let mut push_data_items: Vec<Vec<u8>> = Vec::new();
     
@@ -1059,6 +1332,18 @@ fn parse_flac_manifest_script(script: &[u8]) -> Option<(String, Vec<String>)> {
     
     let filename = String::from_utf8_lossy(&push_data_items[1]).to_string();
     
+    // Parse metadata JSON to extract title, artist, lyrics, and cover_txid
+    let metadata_str = String::from_utf8_lossy(&push_data_items[2]);
+    let (title, artist, lyrics, cover_txid) = if let Ok(metadata) = serde_json::from_str::<serde_json::Value>(&metadata_str) {
+        let title = metadata["title"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let artist = metadata["artist"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let lyrics = metadata["lyrics"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        let cover_txid = metadata["cover_txid"].as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+        (title, artist, lyrics, cover_txid)
+    } else {
+        (None, None, None, None)
+    };
+    
     let chunk_txids: Vec<String> = push_data_items[3..]
         .iter()
         .map(|data| String::from_utf8_lossy(data).to_string())
@@ -1068,7 +1353,14 @@ fn parse_flac_manifest_script(script: &[u8]) -> Option<(String, Vec<String>)> {
         return None;
     }
     
-    Some((filename, chunk_txids))
+    Some(ManifestMetadata {
+        filename,
+        chunk_txids,
+        title,
+        artist,
+        lyrics,
+        cover_txid,
+    })
 }
 
 fn extract_flac_chunk_from_tx(tx_hex: &str) -> Option<Vec<u8>> {

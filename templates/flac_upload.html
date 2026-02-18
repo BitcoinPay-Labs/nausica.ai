@@ -101,6 +101,127 @@
             font-size: 1.1rem;
         }
 
+        /* Network selector styles */
+        .network-selector {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .network-btn {
+            padding: 10px 20px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            background: transparent;
+            color: #888;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-size: 0.9rem;
+        }
+
+        .network-btn:hover {
+            border-color: #555;
+            color: #ccc;
+        }
+
+        .network-btn.active {
+            border-color: #00d4aa;
+            color: #00d4aa;
+            background: rgba(0, 212, 170, 0.1);
+        }
+
+        .network-btn.testnet.active {
+            border-color: #f5a623;
+            color: #f5a623;
+            background: rgba(245, 166, 35, 0.1);
+        }
+
+        /* Metadata form styles */
+        .metadata-section {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .metadata-section.visible {
+            display: block;
+        }
+
+        .metadata-section h3 {
+            margin-bottom: 15px;
+            color: #00d4aa;
+            font-size: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #888;
+            font-size: 0.85rem;
+            margin-bottom: 5px;
+        }
+
+        .form-group input[type="text"],
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            background: #0d0d1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 0.95rem;
+            box-sizing: border-box;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #00d4aa;
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .cover-upload-zone {
+            border: 2px dashed #333;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .cover-upload-zone:hover {
+            border-color: #00d4aa;
+            background: rgba(0, 212, 170, 0.05);
+        }
+
+        .cover-upload-zone.has-cover {
+            border-color: #00d4aa;
+            border-style: solid;
+        }
+
+        .cover-preview {
+            max-width: 150px;
+            max-height: 150px;
+            border-radius: 8px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .cover-preview.visible {
+            display: block;
+            margin: 10px auto 0;
+        }
+
         .upload-btn {
             width: 100%;
             padding: 16px;
@@ -253,12 +374,17 @@
             <p>For best quality, use FLAC.</p>
         </div>
 
+        <div class="network-selector">
+            <button class="network-btn active" id="mainnetBtn" onclick="selectNetwork('mainnet')">Mainnet</button>
+            <button class="network-btn testnet" id="testnetBtn" onclick="selectNetwork('testnet')">Testnet</button>
+        </div>
+
         <div id="uploadSection">
             <div class="upload-zone" id="dropZone">
                 <div class="upload-icon">📁</div>
                 <div class="upload-text">Tap to select or drag & drop</div>
-                <div class="upload-hint">FLAC files only • Max 10MB recommended</div>
-                <input type="file" id="fileInput" accept=".flac,audio/flac" hidden>
+                                <div class="upload-hint">FLAC, WAV, or MP3 files • Max 10MB recommended</div>
+                                <input type="file" id="fileInput" accept=".flac,.wav,.mp3,audio/flac,audio/wav,audio/wave,audio/x-wav,audio/mpeg,audio/mp3" hidden>
             </div>
 
             <div class="file-info" id="fileInfo">
@@ -275,6 +401,34 @@
                     <span class="file-info-value cost-highlight" id="estCost">-</span>
                 </div>
             </div>
+
+            <div class="metadata-section" id="metadataSection">
+                <h3>Track Info (Optional)</h3>
+                <div class="form-group">
+                    <label for="trackTitle">Title</label>
+                    <input type="text" id="trackTitle" placeholder="Enter track title">
+                </div>
+                <div class="form-group">
+                    <label for="artistName">Artist</label>
+                    <input type="text" id="artistName" placeholder="Enter artist name">
+                </div>
+                <div class="form-group">
+                    <label for="coverInput">Cover Art</label>
+                    <div class="cover-upload-zone" id="coverZone">
+                        <span>Click to select image (JPG/PNG)</span>
+                        <input type="file" id="coverInput" accept="image/jpeg,image/png" hidden>
+                        <img class="cover-preview" id="coverPreview" src="" alt="Cover preview">
+                    </div>
+                </div>
+                            <div class="form-group">
+                                <label for="lyricsInput">Lyrics</label>
+                                <textarea id="lyricsInput" placeholder="Enter lyrics (optional)"></textarea>
+                                <div class="lrc-upload-zone" id="lrcZone" style="margin-top: 10px; border: 1px dashed #333; border-radius: 8px; padding: 10px; text-align: center; cursor: pointer; font-size: 0.85rem; color: #888;">
+                                    <span id="lrcLabel">Or upload .lrc file</span>
+                                    <input type="file" id="lrcInput" accept=".lrc" hidden>
+                                </div>
+                            </div>
+                        </div>
 
             <button class="upload-btn" id="uploadBtn">Prepare Upload</button>
         </div>
@@ -306,12 +460,88 @@
         const uploadBtn = document.getElementById('uploadBtn');
         const uploadSection = document.getElementById('uploadSection');
         const paymentSection = document.getElementById('paymentSection');
+        const metadataSection = document.getElementById('metadataSection');
+        const coverZone = document.getElementById('coverZone');
+        const coverInput = document.getElementById('coverInput');
+        const coverPreview = document.getElementById('coverPreview');
 
-        let selectedFile = null;
-        let currentJobId = null;
+                let selectedFile = null;
+                let selectedCover = null;
+                let selectedLrc = null;
+                let currentJobId = null;
+                let selectedNetwork = 'mainnet';
+        
+                const lrcZone = document.getElementById('lrcZone');
+                const lrcInput = document.getElementById('lrcInput');
+
+        // Network selection
+        function selectNetwork(network) {
+            selectedNetwork = network;
+            document.getElementById('mainnetBtn').classList.remove('active');
+            document.getElementById('testnetBtn').classList.remove('active');
+            if (network === 'mainnet') {
+                document.getElementById('mainnetBtn').classList.add('active');
+            } else {
+                document.getElementById('testnetBtn').classList.add('active');
+            }
+        }
 
         // File selection
         dropZone.addEventListener('click', () => fileInput.click());
+
+                // Cover image selection
+                coverZone.addEventListener('click', () => coverInput.click());
+
+                coverInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleCoverFile(e.target.files[0]);
+                    }
+                });
+
+                // LRC file selection
+                lrcZone.addEventListener('click', () => lrcInput.click());
+
+                lrcInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleLrcFile(e.target.files[0]);
+                    }
+                });
+
+                function handleLrcFile(file) {
+                    if (!file.name.toLowerCase().endsWith('.lrc')) {
+                        alert('Please select a .lrc file');
+                        return;
+                    }
+                    selectedLrc = file;
+                    document.getElementById('lrcLabel').textContent = file.name;
+                    lrcZone.style.borderColor = '#00d4aa';
+                    lrcZone.style.color = '#00d4aa';
+            
+                    // Read LRC file and populate lyrics textarea
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        // Keep LRC format with timestamps for karaoke functionality
+                        const lrcContent = e.target.result;
+                        document.getElementById('lyricsInput').value = lrcContent.trim();
+                    };
+                    reader.readAsText(file);
+                }
+
+        function handleCoverFile(file) {
+            if (!file.type.match(/^image\/(jpeg|png)$/)) {
+                alert('Please select a JPG or PNG image');
+                return;
+            }
+            selectedCover = file;
+            coverZone.classList.add('has-cover');
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                coverPreview.src = e.target.result;
+                coverPreview.classList.add('visible');
+            };
+            reader.readAsDataURL(file);
+        }
 
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -337,11 +567,12 @@
             }
         });
 
-        function handleFile(file) {
-            if (!file.name.toLowerCase().endsWith('.flac')) {
-                alert('Please select a FLAC file');
-                return;
-            }
+                function handleFile(file) {
+                    const lowerName = file.name.toLowerCase();
+                    if (!lowerName.endsWith('.flac') && !lowerName.endsWith('.wav') && !lowerName.endsWith('.mp3')) {
+                        alert('Please select a FLAC, WAV, or MP3 file');
+                        return;
+                    }
 
             selectedFile = file;
             dropZone.classList.add('has-file');
@@ -355,6 +586,7 @@
             document.getElementById('estCost').textContent = `~${estBsv} BSV`;
 
             fileInfo.classList.add('visible');
+            metadataSection.classList.add('visible');
             uploadBtn.classList.add('visible');
         }
 
@@ -364,38 +596,97 @@
             return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
         }
 
-        // Upload
-        uploadBtn.addEventListener('click', async () => {
-            if (!selectedFile) return;
+                // Check if admin pay is enabled for the selected network
+                async function checkAdminPay() {
+                    try {
+                        const response = await fetch('/api/admin/check-pay', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ network: selectedNetwork })
+                        });
+                        return await response.json();
+                    } catch (error) {
+                        console.error('Failed to check admin pay:', error);
+                        return { admin_pay_enabled: false };
+                    }
+                }
 
-            uploadBtn.disabled = true;
-            uploadBtn.textContent = 'Preparing...';
+                // Upload
+                uploadBtn.addEventListener('click', async () => {
+                    if (!selectedFile) return;
 
-            const formData = new FormData();
-            formData.append('file', selectedFile);
+                    uploadBtn.disabled = true;
+                    uploadBtn.textContent = 'Preparing...';
 
-            try {
-                const response = await fetch('/api/flac/upload', {
-                    method: 'POST',
-                    body: formData
+                    const formData = new FormData();
+                    formData.append('file', selectedFile);
+                    formData.append('network', selectedNetwork);
+            
+                    // Add metadata
+                    const trackTitle = document.getElementById('trackTitle').value.trim();
+                    const artistName = document.getElementById('artistName').value.trim();
+                    const lyrics = document.getElementById('lyricsInput').value.trim();
+            
+                    if (trackTitle) {
+                        formData.append('title', trackTitle);
+                    }
+                    if (artistName) {
+                        formData.append('artist', artistName);
+                    }
+                    if (selectedCover) {
+                        formData.append('cover', selectedCover);
+                    }
+                    if (lyrics) {
+                        formData.append('lyrics', lyrics);
+                    }
+
+                    // Check if admin pay is enabled
+                    const adminPayStatus = await checkAdminPay();
+                    if (adminPayStatus.admin_pay_enabled) {
+                        formData.append('admin_pay', 'true');
+                    }
+
+                    try {
+                        const response = await fetch('/api/flac/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            currentJobId = data.job_id;
+                            if (data.admin_pay) {
+                                // Admin pay is enabled, skip payment section
+                                showAdminPayProcessing(data);
+                            } else {
+                                showPaymentSection(data);
+                            }
+                        } else {
+                            alert('Error: ' + data.error);
+                            uploadBtn.disabled = false;
+                            uploadBtn.textContent = 'Prepare Upload';
+                        }
+                    } catch (error) {
+                        alert('Upload failed: ' + error.message);
+                        uploadBtn.disabled = false;
+                        uploadBtn.textContent = 'Prepare Upload';
+                    }
                 });
 
-                const data = await response.json();
-
-                if (data.success) {
-                    currentJobId = data.job_id;
-                    showPaymentSection(data);
-                } else {
-                    alert('Error: ' + data.error);
-                    uploadBtn.disabled = false;
-                    uploadBtn.textContent = 'Prepare Upload';
+                function showAdminPayProcessing(data) {
+                    uploadSection.style.display = 'none';
+                    paymentSection.classList.add('visible');
+            
+                    document.getElementById('paymentAmount').textContent = 'Admin Pay Enabled';
+                    document.getElementById('paymentAddress').textContent = 'Payment handled by admin wallet';
+                    document.getElementById('qrCode').style.display = 'none';
+                    document.getElementById('copyBtn').style.display = 'none';
+                    document.getElementById('statusMessage').innerHTML = '⏳ Processing upload with admin wallet...';
+            
+                    // Start polling for status
+                    pollPaymentStatus();
                 }
-            } catch (error) {
-                alert('Upload failed: ' + error.message);
-                uploadBtn.disabled = false;
-                uploadBtn.textContent = 'Prepare Upload';
-            }
-        });
 
         function showPaymentSection(data) {
             uploadSection.style.display = 'none';
