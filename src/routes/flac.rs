@@ -473,7 +473,14 @@ fn extract_image_from_tx(tx_hex: &str) -> Option<Vec<u8>> {
         let script = &tx_bytes[i..i + script_len as usize];
         i += script_len as usize;
         
-        // Check for OP_RETURN (0x6a) or OP_FALSE OP_RETURN (0x00 0x6a)
+        // Check for OP_FALSE OP_IF (0x00 0x63) - our cover image format
+        if script.len() > 4 && script[0] == 0x00 && script[1] == 0x63 {
+            if let Some(data) = parse_coverart_script(&script[2..]) {
+                return Some(data);
+            }
+        }
+        
+        // Also check for OP_RETURN (0x6a) or OP_FALSE OP_RETURN (0x00 0x6a)
         if script.len() > 2 && (script[0] == 0x6a || (script[0] == 0x00 && script[1] == 0x6a)) {
             let start = if script[0] == 0x6a { 1 } else { 2 };
             if let Some(data) = parse_image_script(&script[start..]) {
@@ -483,6 +490,45 @@ fn extract_image_from_tx(tx_hex: &str) -> Option<Vec<u8>> {
     }
     
     None
+}
+
+/// Parse cover art script in OP_FALSE OP_IF "coverart" <data chunks> OP_ENDIF format
+fn parse_coverart_script(script: &[u8]) -> Option<Vec<u8>> {
+    let mut i = 0;
+    
+    // First push should be "coverart" protocol identifier
+    if let Some((data, size)) = crate::read_push_data(&script[i..]) {
+        let data_str = String::from_utf8_lossy(&data);
+        if data_str == "coverart" {
+            i += size;
+        } else {
+            return None; // Not a coverart script
+        }
+    } else {
+        return None;
+    }
+    
+    // Read all image data chunks until OP_ENDIF (0x68)
+    let mut image_data = Vec::new();
+    while i < script.len() {
+        // Check for OP_ENDIF
+        if script[i] == 0x68 {
+            break;
+        }
+        
+        if let Some((chunk, size)) = crate::read_push_data(&script[i..]) {
+            image_data.extend_from_slice(&chunk);
+            i += size;
+        } else {
+            break;
+        }
+    }
+    
+    if !image_data.is_empty() {
+        Some(image_data)
+    } else {
+        None
+    }
 }
 
 fn parse_image_script(script: &[u8]) -> Option<Vec<u8>> {
