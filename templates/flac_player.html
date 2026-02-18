@@ -304,36 +304,6 @@
             height: 28px;
         }
 
-        /* Volume control */
-        .volume-control {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .volume-slider {
-            flex: 1;
-            height: 4px;
-            -webkit-appearance: none;
-            background: #333;
-            border-radius: 2px;
-            outline: none;
-        }
-
-        .volume-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 14px;
-            height: 14px;
-            background: #fff;
-            border-radius: 50%;
-            cursor: pointer;
-        }
-
-        .volume-icon {
-            color: #888;
-            font-size: 1.2rem;
-        }
-
         /* Download button */
         .download-section {
             margin-top: 20px;
@@ -581,12 +551,7 @@
                     </button>
                 </div>
 
-                <!-- Volume control -->
-                <div class="volume-control">
-                    <span class="volume-icon" id="volumeIcon">🔊</span>
-                    <input type="range" class="volume-slider" id="volumeSlider" 
-                           min="0" max="100" value="100">
-                </div>
+                <!-- Volume control removed - use device volume buttons -->
             </div>
 
             <!-- Lyrics section -->
@@ -879,9 +844,6 @@
         const progressHandle = document.getElementById('progressHandle');
         const currentTimeEl = document.getElementById('currentTime');
         const durationEl = document.getElementById('duration');
-        const volumeSlider = document.getElementById('volumeSlider');
-        const volumeIcon = document.getElementById('volumeIcon');
-
         playBtn.addEventListener('click', togglePlay);
 
         function togglePlay() {
@@ -929,23 +891,6 @@
         document.getElementById('forwardBtn').addEventListener('click', () => {
             audioPlayer.currentTime = Math.min(audioPlayer.duration, audioPlayer.currentTime + 10);
         });
-
-        // Volume control
-        volumeSlider.addEventListener('input', (e) => {
-            const volume = e.target.value / 100;
-            audioPlayer.volume = volume;
-            updateVolumeIcon(volume);
-        });
-
-        function updateVolumeIcon(volume) {
-            if (volume === 0) {
-                volumeIcon.textContent = '🔇';
-            } else if (volume < 0.5) {
-                volumeIcon.textContent = '🔉';
-            } else {
-                volumeIcon.textContent = '🔊';
-            }
-        }
 
         function formatTime(seconds) {
             if (isNaN(seconds)) return '0:00';
